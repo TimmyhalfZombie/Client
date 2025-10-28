@@ -5,8 +5,8 @@ import { verticalScale } from "@/utils/styling";
 import { colors, radius } from "@/constants/theme";
 import { Image } from "react-native";
 import { getAvatarPath } from "@/services/imageService";
-const Avatar = ({ uri, size = 40, style, isGroup = false }: AvatarProps) => {
-  const src = getAvatarPath(uri, isGroup);
+const Avatar = ({ uri, size = 40, style }: AvatarProps) => {
+  const src = getAvatarPath(uri);
 
   // Normalize different shapes: string URL, local require (number), or an object
   // from image picker which may have { uri } or { url }.

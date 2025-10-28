@@ -8,31 +8,7 @@ import {
   joinOperators 
 } from "@/socket/socketEvents";
 import { logger } from "@/utils/logger";
-
-export interface AssistRequestData {
-  id: string;
-  user: {
-    id: string;
-    name: string;
-    avatar?: string;
-  };
-  vehicle: {
-    model: string;
-    plate: string;
-    notes?: string;
-  };
-  location: {
-    lat: number;
-    lng: number;
-    address: string;
-  };
-  createdAt: string;
-}
-
-interface OperatorRequestManagerProps {
-  onRequestAccepted?: (requestId: string) => void;
-  onRequestRemoved?: (requestId: string, takenBy: string) => void;
-}
+import { AssistRequestData, OperatorRequestManagerProps } from "@/types";
 
 /**
  * Handles real-time operator request management

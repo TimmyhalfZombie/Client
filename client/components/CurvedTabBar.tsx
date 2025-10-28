@@ -1,3 +1,4 @@
+// client/components/CurvedTabBar.tsx
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import * as Icons from "phosphor-react-native";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
@@ -50,29 +51,63 @@ function toTitle(s: string) {
 
 const AnimatedPath = Animated.createAnimatedComponent(Path);
 
-export default function CurvedTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
-  const routes = useMemo(() => state.routes.filter((r) => SAFE_TABS.has(r.name)), [state.routes]);
+export default function CurvedTabBar({
+  state,
+  descriptors,
+  navigation,
+}: BottomTabBarProps) {
+  // Keep only tabs we explicitly style for
+  const routes = useMemo(
+    () => state.routes.filter((r) => SAFE_TABS.has(r.name)),
+    [state.routes]
+  );
+
+  // If nothing to render, bail out (avoids any undefined route access)
+  if (routes.length === 0) {
+    return <View style={{ height: BAR_HEIGHT, backgroundColor: BG }} />;
+  }
+
+  // Safely resolve the current route key
+  const currentRouteKey =
+    state.routes[state.index]?.key ??
+    routes[0]?.key ??
+    state.routes[0]?.key ??
+    "";
+
+  // Compute active index safely
+  const activeIndex = useMemo(() => {
+    if (!currentRouteKey) return 0;
+    const idx = routes.findIndex((r) => r.key === currentRouteKey);
+    return idx >= 0 ? idx : 0;
+  }, [routes, currentRouteKey]);
 
   const [width, setWidth] = useState<number>(SCREEN_WIDTH);
-  const onLayout = useCallback((e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width), []);
+  const onLayout = useCallback(
+    (e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width),
+    []
+  );
+
+  // Shared values
   const widthSV = useSharedValue(SCREEN_WIDTH);
   const tabWsv = useSharedValue(width / Math.max(routes.length, 1));
+  const activeIndexSV = useSharedValue(activeIndex);
+
+  // Positions
+  const notchCenterX = useSharedValue(
+    activeIndex * tabWsv.value + tabWsv.value / 2
+  );
+  const haloX = useSharedValue(activeIndex * tabWsv.value);
+  const haloLiftY = useSharedValue(0);
+  const notchDepthSV = useSharedValue(NOTCH_DEPTH);
 
   useEffect(() => {
     widthSV.value = width;
     tabWsv.value = width / Math.max(routes.length, 1);
   }, [width, routes.length, widthSV, tabWsv]);
 
-  const activeIndex = Math.max(0, routes.findIndex((r) => r.key === state.routes[state.index].key));
-  const activeIndexSV = useSharedValue(activeIndex);
   useEffect(() => {
     activeIndexSV.value = activeIndex;
   }, [activeIndex, activeIndexSV]);
-
-  const notchCenterX = useSharedValue(activeIndex * tabWsv.value + tabWsv.value / 2);
-  const haloX = useSharedValue(activeIndex * tabWsv.value);
-  const haloLiftY = useSharedValue(0);
-  const notchDepthSV = useSharedValue(NOTCH_DEPTH);
 
   useEffect(() => {
     const tabW = width / Math.max(routes.length, 1);
@@ -82,9 +117,9 @@ export default function CurvedTabBar({ state, descriptors, navigation }: BottomT
     // Apply offset to notch & halo based on tab
     const activeName = routes[activeIndex]?.name;
     if (activeName === "home") {
-      offset = -2; // adjusted to move 13px to the right (-15 + 13 = -2)
+      offset = -2; // slight nudge
     } else if (activeName === "activity" || activeName === "message") {
-      offset = 0; // center the curve for activity and messages
+      offset = 0; // centered
     }
 
     notchCenterX.value = withTiming(rawCenter + offset, {
@@ -102,6 +137,8 @@ export default function CurvedTabBar({ state, descriptors, navigation }: BottomT
 
   useDerivedValue(() => {
     "worklet";
+    // trigger when activeIndex changes
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const _ = activeIndexSV.value;
     haloLiftY.value = withTiming(HALO_LIFT_Y, {
       duration: 300,
@@ -115,7 +152,14 @@ export default function CurvedTabBar({ state, descriptors, navigation }: BottomT
 
   const animatedPath = useAnimatedProps(() => {
     "worklet";
-    function buildPath(W: number, H: number, cx: number, notchW: number, notchD: number, radius: number): string {
+    function buildPath(
+      W: number,
+      H: number,
+      cx: number,
+      notchW: number,
+      notchD: number,
+      radius: number
+    ): string {
       "worklet";
       const left = 0,
         right = W,
@@ -163,14 +207,22 @@ export default function CurvedTabBar({ state, descriptors, navigation }: BottomT
     "worklet";
     return {
       transform: [
-        { translateX: haloX.value + (tabWsv.value - ICON_BG) / 2 + HALO_OFFSET_X },
+        {
+          translateX:
+            haloX.value + (tabWsv.value - ICON_BG) / 2 + HALO_OFFSET_X,
+        },
         { translateY: haloLiftY.value },
       ],
     };
   });
 
   const handlePress = useCallback(
-    (routeName: string, routeKey: string, isFocused: boolean, index: number) => {
+    (
+      routeName: string,
+      routeKey: string,
+      isFocused: boolean,
+      index: number
+    ) => {
       if (activeIndex === index) {
         haloLiftY.value = withTiming(
           HALO_PRESS_LIFT_Y,
@@ -242,7 +294,11 @@ export default function CurvedTabBar({ state, descriptors, navigation }: BottomT
 
         {/* Lifted halo */}
         <Animated.View
-          style={[styles.haloContainer, { width: tabWidth, height: BAR_HEIGHT }, haloStyle]}
+          style={[
+            styles.haloContainer,
+            { width: tabWidth, height: BAR_HEIGHT },
+            haloStyle,
+          ]}
           pointerEvents="none"
         >
           <View style={styles.halo}>
@@ -250,16 +306,20 @@ export default function CurvedTabBar({ state, descriptors, navigation }: BottomT
           </View>
         </Animated.View>
 
-         {/* Tabs */}
+        {/* Tabs */}
         <View style={styles.row}>
           {routes.map((route, index) => {
             const isFocused = activeIndex === index;
-            const options = descriptors[route.key]?.options ?? {};
+            const descriptor = descriptors[route.key];
+            const options: any = descriptor?.options ?? {};
             const raw =
               options.tabBarLabel ??
               options.title ??
-              (route.name === "message" ? "Messages" : 
-               route.name === "profileModal" ? "Profile" : toTitle(route.name));
+              (route.name === "message"
+                ? "Messages"
+                : route.name === "profileModal"
+                ? "Profile"
+                : toTitle(route.name));
             const label = typeof raw === "string" ? raw : toTitle(route.name);
 
             let IconComp: any;
@@ -285,7 +345,9 @@ export default function CurvedTabBar({ state, descriptors, navigation }: BottomT
                 key={route.key}
                 style={[styles.tab, { width: tabWidth }]}
                 activeOpacity={0.9}
-                onPress={() => handlePress(route.name, route.key, isFocused, index)}
+                onPress={() =>
+                  handlePress(route.name, route.key, isFocused, index)
+                }
                 accessibilityRole="button"
                 accessibilityState={isFocused ? { selected: true } : {}}
                 accessibilityLabel={options.tabBarAccessibilityLabel}
@@ -309,7 +371,11 @@ export default function CurvedTabBar({ state, descriptors, navigation }: BottomT
 
 const styles = StyleSheet.create({
   bar: { width: "100%", overflow: "visible", justifyContent: "center" },
-  row: { flexDirection: "row", alignItems: "center", justifyContent: "space-around" },
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-around",
+  },
   tab: { height: BAR_HEIGHT, alignItems: "center", justifyContent: "center" },
   tabInner: {
     height: 52,
@@ -323,7 +389,13 @@ const styles = StyleSheet.create({
   },
   label: { fontSize: 12, color: INACTIVE_TEXT },
   labelActive: { color: ACTIVE_GREEN, fontWeight: "600" },
-  haloContainer: { position: "absolute", left: 0, top: 0, alignItems: "center", justifyContent: "center" },
+  haloContainer: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   halo: {
     width: ICON_BG,
     height: ICON_BG,

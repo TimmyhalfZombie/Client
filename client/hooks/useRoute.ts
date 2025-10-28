@@ -1,52 +1,122 @@
 import { useState, useCallback } from "react";
+import { Step } from "@/types";
 
-type Step = {
-  instruction: string;
-  distance: number;
-  duration: number;
-};
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "http://localhost:3000";
 
 export function useRoute() {
   const [routeGeoJSON, setRouteGeoJSON] = useState<any>(null);
   const [steps, setSteps] = useState<Step[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchRoute = useCallback(
     async (origin: [number, number], dest: [number, number]) => {
       try {
+        setLoading(true);
+        setError(null);
+
         const body = {
-          coordinates: [origin, dest],
-          instructions: true,
+          origin: { lat: origin[1], lng: origin[0] },
+          destination: { lat: dest[1], lng: dest[0] },
         };
 
-        const res = await fetch(
-          "https://api.openrouteservice.org/v2/directions/driving-car/geojson",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: process.env.EXPO_PUBLIC_ORS_KEY || "",
-            },
-            body: JSON.stringify(body),
-          }
-        );
+        const res = await fetch(`${API_BASE_URL}/api/routing/route`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            // Add auth token if available
+            ...(global.authToken && { Authorization: `Bearer ${global.authToken}` }),
+          },
+          body: JSON.stringify(body),
+        });
 
         const json = await res.json();
-        if (json.features?.length) {
-          setRouteGeoJSON(json);
-          const s: Step[] =
-            json.features[0].properties.segments[0].steps.map((st: any) => ({
-              instruction: st.instruction,
-              distance: st.distance,
-              duration: st.duration,
-            }));
+        
+        if (json.success && json.data) {
+          // Convert server response to GeoJSON format
+          const geoJSON = {
+            type: "FeatureCollection",
+            features: [{
+              type: "Feature",
+              geometry: json.data.geometry,
+              properties: json.data.properties
+            }]
+          };
+          
+          setRouteGeoJSON(geoJSON);
+          
+          // Extract steps from the response
+          const s: Step[] = json.data.properties.segments[0]?.steps?.map((st: any) => ({
+            instruction: st.instruction,
+            distance: st.distance,
+            duration: st.duration,
+          })) || [];
           setSteps(s);
+        } else {
+          setError(json.error || "Failed to fetch route");
         }
       } catch (err) {
         console.warn("[useRoute] fetch error", err);
+        setError("Network error while fetching route");
+      } finally {
+        setLoading(false);
       }
     },
     []
   );
 
-  return { routeGeoJSON, steps, fetchRoute };
+  const fetchETA = useCallback(
+    async (operatorLocation: { lat: number; lng: number }, customerLocation: { lat: number; lng: number }) => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        const body = {
+          operatorLocation,
+          customerLocation,
+        };
+
+        const res = await fetch(`${API_BASE_URL}/api/routing/eta`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(global.authToken && { Authorization: `Bearer ${global.authToken}` }),
+          },
+          body: JSON.stringify(body),
+        });
+
+        const json = await res.json();
+        
+        if (json.success && json.data) {
+          return json.data;
+        } else {
+          setError(json.error || "Failed to fetch ETA");
+          return null;
+        }
+      } catch (err) {
+        console.warn("[useRoute] ETA fetch error", err);
+        setError("Network error while fetching ETA");
+        return null;
+      } finally {
+        setLoading(false);
+      }
+    },
+    []
+  );
+
+  const clearRoute = useCallback(() => {
+    setRouteGeoJSON(null);
+    setSteps([]);
+    setError(null);
+  }, []);
+
+  return { 
+    routeGeoJSON, 
+    steps, 
+    loading, 
+    error, 
+    fetchRoute, 
+    fetchETA, 
+    clearRoute 
+  };
 }

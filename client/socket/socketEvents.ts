@@ -59,33 +59,6 @@ export const deleteConversation = (params: {
 export const conversationDeleted = (payload: any, off: boolean = false) =>
   wire("conversationDeleted", payload, off);
 
-/** ===== CALL SIGNALING (existing) ===== */
-export const callInvite = (payload: {
-  conversationId: string;
-  channel: string;
-  kind?: "video" | "audio";
-  from?: { id: string; name?: string; avatar?: string };
-}) => wire("call:invite", payload);
-export const onCallIncoming = (cb: (evt: any) => void, off = false) =>
-  wire("call:incoming", cb, off);
-export const callAccept = (payload: {
-  conversationId: string;
-  channel: string;
-}) => wire("call:accept", payload);
-export const callReject = (payload: {
-  conversationId: string;
-  channel: string;
-}) => wire("call:reject", payload);
-export const callCancel = (payload: {
-  conversationId: string;
-  channel: string;
-}) => wire("call:cancel", payload);
-export const onCallAccepted = (cb: (evt: any) => void, off = false) =>
-  wire("call:accepted", cb, off);
-export const onCallRejected = (cb: (evt: any) => void, off = false) =>
-  wire("call:rejected", cb, off);
-export const onCallCancelled = (cb: (evt: any) => void, off = false) =>
-  wire("call:cancelled", cb, off);
 
 /* ===================== Assist (Customer) ===================== */
 /**
@@ -160,8 +133,12 @@ export const assistAccept = (payload: { id: string }, cb?: (ack: any) => void) =
   socket.emit("assist:accept", payload);
 };
 
-export const joinOperators = () => wire("joinOperators");
+export const joinOperators = (cb?: (evt: any) => void, off = false) =>
+  wire("joinOperators", cb, off);
 
-export const assistStatus = (payload: any) => wire("assist:status", payload);
-export const assistCancel = (payload: any) => wire("assist:cancel", payload);
-export const assistDetails = (payload: any) => wire("assist:details", payload);
+export const assistStatus = (payload: any, cb?: (evt: any) => void, off = false) =>
+  wire("assist:status", payload, off);
+export const assistCancel = (payload: any, cb?: (evt: any) => void, off = false) =>
+  wire("assist:cancel", payload, off);
+export const assistDetails = (payload: any, cb?: (evt: any) => void, off = false) =>
+  wire("assist:details", payload, off); 

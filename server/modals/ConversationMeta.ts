@@ -1,5 +1,6 @@
 import { Schema, model } from "mongoose";
 import { ConversationMetaProps } from "../types";
+import { getCustomerConnection } from "../config/db";
 
 const ConversationMetaSchema = new Schema<ConversationMetaProps>(
   {
@@ -7,13 +8,11 @@ const ConversationMetaSchema = new Schema<ConversationMetaProps>(
       type: Schema.Types.ObjectId,
       ref: "Conversation",
       required: true,
-      index: true,
     },
     userId: {
       type: Schema.Types.ObjectId,
       ref: "User",
       required: true,
-      index: true,
     },
     unreadCount: { type: Number, default: 0 },
     lastReadAt: { type: Date },
@@ -30,7 +29,6 @@ ConversationMetaSchema.index(
   { unique: true }
 );
 
-export default model<ConversationMetaProps>(
-  "ConversationMeta",
-  ConversationMetaSchema
-);
+// Use customer connection for ConversationMeta model
+const customer = getCustomerConnection();
+export default customer.model<ConversationMetaProps>("ConversationMeta", ConversationMetaSchema);

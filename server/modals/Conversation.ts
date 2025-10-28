@@ -2,11 +2,13 @@
 
     import { model, Schema } from "mongoose"
     import { ConversationProps } from "../types"
+    import { getCustomerConnection } from "../config/db";
 
     const ConversationSchema = new Schema<ConversationProps>({
         type: {
             type: String,
-            enum: ['direct', 'group'],
+            enum: ['direct'], // Only direct 1-on-1 messaging (customer ↔ operator)
+            default: 'direct',
             required: true,
         },
         name: String,
@@ -44,4 +46,6 @@
         next();
     });
 
-    export default model<ConversationProps>("Conversation", ConversationSchema);
+    // Use customer connection for Conversation model
+    const customer = getCustomerConnection();
+    export default customer.model<ConversationProps>("Conversation", ConversationSchema);

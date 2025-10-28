@@ -1,19 +1,17 @@
+
 // client/services/assistChatService.ts
 import { getSocket } from "@/socket/socket";
 import { newConversation } from "@/socket/socketEvents";
+import { AssistChatInfo } from "@/types";
 
-export interface AssistChatInfo {
-  assistRequestId: string;
-  customerId: string;
-  operatorId: string;
-  customerName: string;
-  operatorName: string;
-  vehicleInfo?: string;
-  locationInfo?: string;
+/** Utility: make a stable, deduped, sorted participants array */
+function normalizeParticipants(ids: (string | undefined | null)[]) {
+  return Array.from(new Set(ids.filter(Boolean).map(String))).sort();
 }
 
 /**
  * Creates a conversation between customer and operator for an assist request
+ * NOTE: We only normalized/sorted participants so both apps emit the same order.
  */
 export async function createAssistConversation(info: AssistChatInfo): Promise<boolean> {
   try {
@@ -23,17 +21,21 @@ export async function createAssistConversation(info: AssistChatInfo): Promise<bo
       return false;
     }
 
-    // Create conversation between customer and operator
+    const participants = normalizeParticipants([info.customerId, info.operatorId]);
+
+    // Keep your payload, just swap in normalized participants.
     const conversationData = {
       type: "direct",
-      participants: [info.customerId, info.operatorId],
-      name: `Assistance Request - ${info.vehicleInfo || 'Vehicle Repair'}`,
+      participants,
+      name: `Assistance Request - ${info.vehicleInfo || "Vehicle Repair"}`,
+      // Optional hint that both sides can send (ignored if server doesn't use it)
+      // helps future-proof if you dedupe server-side:
+      // pairKey: `${participants[0]}:${participants[1]}:${info.assistRequestId ?? ""}`,
+      // requestId: info.assistRequestId, // include if your server uses it for per-request threads
     };
 
     return new Promise((resolve) => {
-      const timeout = setTimeout(() => {
-        resolve(false);
-      }, 10000); // 10 second timeout
+      const timeout = setTimeout(() => resolve(false), 10000);
 
       newConversation((response: any) => {
         clearTimeout(timeout);
@@ -46,7 +48,6 @@ export async function createAssistConversation(info: AssistChatInfo): Promise<bo
         }
       });
 
-      // Emit the conversation creation
       socket.emit("newConversation", conversationData);
     });
   } catch (error) {
@@ -55,26 +56,12 @@ export async function createAssistConversation(info: AssistChatInfo): Promise<bo
   }
 }
 
-/**
- * Gets conversations related to assist requests
- */
 export function getAssistRelatedConversations(conversations: any[]): any[] {
-  return conversations.filter(conv => {
-    // Filter for direct conversations that might be assist-related
-    return conv.type === "direct" && conv.participants.length === 2;
-  });
+  return conversations.filter((conv) => conv.type === "direct" && conv.participants.length === 2);
 }
 
-/**
- * Checks if a conversation is related to an assist request
- */
 export function isAssistConversation(conversation: any): boolean {
-  // Check if conversation name contains assist-related keywords
-  const assistKeywords = ['assistance', 'request', 'repair', 'vehicle', 'assist'];
-  const name = (conversation.name || '').toLowerCase();
-  
-  return assistKeywords.some(keyword => name.includes(keyword));
+  const assistKeywords = ["assistance", "request", "repair", "vehicle", "assist"];
+  const name = (conversation.name || "").toLowerCase();
+  return assistKeywords.some((k) => name.includes(k));
 }
-
-
-

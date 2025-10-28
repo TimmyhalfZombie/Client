@@ -11,9 +11,25 @@ function joinClean(parts: Array<string | undefined | null>, sep = ", ") {
     .join(sep);
 }
 function formatFullAddress(r: Partial<Location.LocationGeocodedAddress>) {
+  // Filter out unnamed roads
+  const street = r.name || r.street;
+  const cleanStreet = street && 
+    !street.toLowerCase().includes('unnamed') && 
+    !street.toLowerCase().includes('unamed') &&
+    !street.toLowerCase().includes('unnamed road') &&
+    !street.toLowerCase().includes('unnamed street') &&
+    !street.toLowerCase().includes('unnamed avenue') &&
+    !street.toLowerCase().includes('unnamed lane') &&
+    street.trim() !== 'Road' &&
+    street.trim() !== 'Street' &&
+    street.trim() !== 'Avenue' &&
+    street.trim() !== 'Lane'
+    ? street
+    : undefined;
+
   return joinClean(
     [
-      r.name || r.street,
+      cleanStreet,
       r.district,
       r.city || r.subregion,
       r.region,

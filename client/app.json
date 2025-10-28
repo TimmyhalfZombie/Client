@@ -16,6 +16,7 @@
       },
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "We use your location to show your position on the map.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "We use your location to track your position and provide real-time assistance.",
         "NSCameraUsageDescription": "We use your camera for video calls.",
         "NSMicrophoneUsageDescription": "We use your microphone for calls."
       }
@@ -29,6 +30,7 @@
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
         "CAMERA",
         "RECORD_AUDIO",
         "MODIFY_AUDIO_SETTINGS",

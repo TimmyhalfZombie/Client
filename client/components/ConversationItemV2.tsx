@@ -24,15 +24,9 @@ export default function ConversationItemV2({
   showDivider,
   router,
 }: ConversationListItemProps) {
-  const title =
-    item.type === "group"
-      ? item.name || "Group"
-      : item.participants.find((p) => p._id)?.name || "Direct";
+  const title = item.participants.find((p) => p._id)?.name || "Direct";
 
-  const avatar =
-    item.type === "group"
-      ? item.avatar || ""
-      : item.participants.find((p) => p._id)?.avatar || "";
+  const avatar = item.participants.find((p) => p._id)?.avatar || "";
 
   const unread = item.unreadCount ?? 0;
   const rel = formatRelative(item.lastMessage?.createdAt || item.updatedAt);
@@ -55,7 +49,7 @@ export default function ConversationItemV2({
         })
       }
     >
-      <Avatar size={45} uri={avatar} isGroup={item.type === "group"} />
+      <Avatar size={45} uri={avatar} />
 
       <View style={{ flex: 1 }}>
         <View style={{ flexDirection: "row", alignItems: "center" }}>

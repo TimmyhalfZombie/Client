@@ -149,7 +149,6 @@ const Login = () => {
   return (
     <SafeAreaView style={styles.safe} edges={["top", "right", "left", "bottom"]}>
       <StatusBar translucent={false} backgroundColor={colors.black} />
-
       <View style={styles.kav}>
         <View style={styles.content}>
           <View style={styles.form}>
@@ -159,7 +158,7 @@ const Login = () => {
                 <Text style={{ color: colors.white }}> up</Text>
               </Typo>
               <Typo
-                color={colors.neutral100}
+                color={colors.neutral100}                                                                   
                 style={{ textAlign: "center", marginTop: -spacingY._12 }}
                 fontFamily="InterLight"
               >

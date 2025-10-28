@@ -6,7 +6,9 @@ import dotenv from "dotenv";
 import connectDB from "./config/db";
 import authRoutes from "./routes/auth.routes";
 import { initializeSocket } from "./socket/socket";
-import assistRoutes from "./routes/assist.routes"; 
+import assistRoutes from "./routes/assist.routes";
+import routingRoutes from "./routes/routing.routes";
+import { stopAutoRefresh } from "./socket/assistEvents"; 
 
 // Load environment variables
 dotenv.config();
@@ -26,7 +28,8 @@ app.use(
 
 
 app.use("/auth", authRoutes);
-app.use("/api/assist", assistRoutes); 
+app.use("/api/assist", assistRoutes);
+app.use("/api/routing", routingRoutes); 
 app.get("/", (_req, res) => {
   res.send("Server is running");
 });
@@ -55,3 +58,21 @@ connectDB()
       error
     );
   });
+
+// Graceful shutdown
+process.on("SIGTERM", () => {
+  console.log("SIGTERM signal received: closing HTTP server");
+  stopAutoRefresh();
+  server.close(() => {
+    console.log("HTTP server closed");
+  });
+});
+
+process.on("SIGINT", () => {
+  console.log("SIGINT signal received: closing HTTP server");
+  stopAutoRefresh();
+  server.close(() => {
+    console.log("HTTP server closed");
+    process.exit(0);
+  });
+});

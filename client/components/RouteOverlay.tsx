@@ -1,3 +1,4 @@
+// client/components/RouteOverlay.tsx
 import React from "react";
 import { ShapeSource, LineLayer } from "@maplibre/maplibre-react-native";
 

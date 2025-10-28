@@ -68,7 +68,7 @@ const ConversationItem = ({
         delayLongPress={250}
         onLongPress={() => onLongPress?.(item)}
       >
-        <Avatar uri={avatar} size={47} isGroup={item.type === "group"} />
+        <Avatar uri={avatar} size={47} />
 
         <View style={{ flex: 1 }}>
           <View style={styles.row}>

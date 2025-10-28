@@ -6,11 +6,8 @@ import ScreenWrapper from "@/components/ScreenWrapper";
 import Typo from "@/components/Typo";
 import { colors, spacingX, spacingY } from "@/constants/theme";
 import { useAuth } from "@/contexts/authContext";
-import { verticalScale } from "@/utils/styling";
-import * as Icons from "phosphor-react-native";
 import { useRouter, useFocusEffect } from "expo-router";
 import Loading from "@/components/Loading";
-import Button from "@/components/Button";
 import ConversationItem from "@/components/ConversationItem";
 import {
   getConversations,
@@ -28,8 +25,6 @@ import Animated, {
   LinearTransition,
 } from "react-native-reanimated";
 
-// 👇 NEW
-import { callInvite } from "@/socket/socketEvents";
 
 const sortByRecent = (a: ConversationProps, b: ConversationProps) => {
   const aDate = a?.lastMessage?.createdAt || a.createdAt;
@@ -120,29 +115,6 @@ const Message = () => {
     setSheetOpen(true);
   };
 
-  const handleVideoCall = () => {
-    if (!selected) return;
-    setSheetOpen(false);
-
-    // 👇 1) Signal the other device(s) first
-    callInvite({
-      conversationId: selected._id,
-      channel: selected._id, // using conversationId as agora channel
-      kind: "video",
-    });
-
-    // 👇 2) Navigate caller into call screen immediately
-    router.push({
-      pathname: "/(main)/call",
-      params: {
-        channel: selected._id,
-        name:
-          selected.type === "direct"
-            ? selected.participants.find((p) => p._id)?.name
-            : selected.name || "Group",
-      },
-    });
-  };
 
   const handleDelete = () => {
     if (!selected) return;
@@ -195,22 +167,6 @@ const Message = () => {
               Chats
             </Typo>
           </View>
-
-          <Button
-            style={styles.floatingButton}
-            onPress={() =>
-              router.push({
-                pathname: "/(main)/newConversationModal",
-                params: { isGroup: 0 },
-              })
-            }
-          >
-            <Icons.PlusIcon
-              color={"#121217"}
-              weight="bold"
-              size={verticalScale(24)}
-            />
-          </Button>
         </Animated.View>
 
         <View style={styles.content}>
@@ -259,7 +215,6 @@ const Message = () => {
       <ConversationActionsSheet
         visible={sheetOpen}
         onClose={() => setSheetOpen(false)}
-        onVideoCall={handleVideoCall}
         onDelete={handleDelete}
       />
     </ScreenWrapper>
@@ -282,13 +237,4 @@ const styles = StyleSheet.create({
   },
   conversationList: { paddingVertical: spacingY._10 },
   divider: { height: 1, backgroundColor: "#2B2D31", marginVertical: 8 },
-  floatingButton: {
-    height: verticalScale(30),
-    width: verticalScale(30),
-    borderRadius: 100,
-    position: "absolute",
-    bottom: verticalScale(10),
-    right: verticalScale(30),
-    backgroundColor: colors.white,
-  },
 });

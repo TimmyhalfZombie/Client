@@ -277,13 +277,6 @@ export default function RequestStatusOverlay({
                   />
                 </View>
 
-                <Pressable
-                  onPress={handleCancel}
-                  style={styles.cancelBtn}
-                  testID="cancel-request-btn"
-                >
-                  <Text style={styles.cancelText}>Cancel request</Text>
-                </Pressable>
               </>
             )}
           </View>

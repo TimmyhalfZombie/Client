@@ -1,20 +1,16 @@
-import React, { useCallback, useEffect, useMemo, useState, useRef } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import { View, FlatList, StyleSheet, Pressable, RefreshControl } from "react-native";
 import { useFocusEffect, router } from "expo-router";
 import ScreenWrapper from "@/components/ScreenWrapper";
 import Typo from "@/components/Typo";
 import { colors, spacingX, spacingY, radius } from "@/constants/theme";
-
 import {
   getActivity,
   forceRefreshFromDatabase,
-  clearAllLocalData,
-  ActivityItem,
-  onActivityChange,
+  bindAssistRealtimeDeletes,
 } from "@/utils/activityStore";
-import { testApiConnection } from "@/utils/testApiConnection";
+import { ActivityItem } from "@/types";
 import { getSocket } from "@/socket/socket";
-import { bindAssistRealtimeDeletes } from "@/utils/activityStore";
 import * as Icons from "phosphor-react-native";
 import { useLocation } from "@/contexts/LocationContext";
 
@@ -22,60 +18,54 @@ const BG_CARD = "#121417";
 const BG_SCREEN = "#0D0D0D";
 const CANCEL_COLOR = "#FF5A5A";
 
-/** Format location with street, barangay, city */
-const formatLocation = (item: ActivityItem, currentLocation?: any): string => {
-  // If we have specific location data, use it
-  if (item.location) {
-    const { street, barangay, city } = item.location;
-    const parts = [];
-    if (street) parts.push(street);
-    if (barangay) parts.push(barangay);
-    if (city) parts.push(city);
-    return parts.join(", ") || "Location not specified";
-  }
-  
-  // If we have current location and no specific location data, use current location
-  if (currentLocation && currentLocation.street) {
-    const { street, barangay, city } = currentLocation;
-    const parts = [];
-    if (street) parts.push(street);
-    if (barangay) parts.push(barangay);
-    if (city) parts.push(city);
-    return parts.join(", ");
-  }
-  
-  // Fallback to existing data
-  if (item.placeName) {
-    return item.placeName;
-  }
-  
-  if (item.title) {
-    return item.title;
-  }
-  
-  // Generate a sample location if no data is available
-  const sampleLocations = [
-    "123 Rizal Street, Barangay Central, Quezon City",
-    "456 Mabini Avenue, Barangay North, Manila",
-    "789 Bonifacio Road, Barangay South, Makati",
-    "321 Aguinaldo Street, Barangay East, Taguig",
-    "654 Luna Drive, Barangay West, Pasig",
-    "987 Katipunan Avenue, Barangay Heights, Marikina",
-    "147 EDSA Extension, Barangay Central, Mandaluyong",
-    "258 Commonwealth Avenue, Barangay North, Quezon City",
-    "369 Ortigas Avenue, Barangay South, San Juan",
-    "741 Shaw Boulevard, Barangay East, Mandaluyong"
-  ];
-  
-  // Use item ID to consistently pick the same location for the same item
-  const index = item.id ? parseInt(item.id.slice(-1), 16) % sampleLocations.length : 0;
-  return sampleLocations[index];
+// Normalize colors to plain strings
+const COLOR = {
+  green: colors?.green ?? "#6EFF87",
+  white: colors?.white ?? "#FFFFFF",
+  neutral300: colors?.neutral300 ?? "#D1D5DB",
+  neutral400: colors?.neutral400 ?? "#9CA3AF",
+  neutral500: colors?.neutral500 ?? "#6B7280",
 };
 
-/** Helpers (kept short) */
+// Minimal, stable id generator
+const getItemId = (item: ActivityItem, ix?: number): string => {
+  if (item.id) return item.id;
+  if (typeof ix === "number") return `idx_${ix}`;
+  return `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+};
+
+// Format location -> always a string (now accepts null)
+const formatLocation = (
+  item: ActivityItem,
+  currentLocation?: { street?: string; barangay?: string; city?: string } | null
+): string => {
+  const parts: string[] = [];
+
+  if (item.location) {
+    const { street, barangay, city } = item.location;
+    if (street) parts.push(street);
+    if (barangay) parts.push(barangay);
+    if (city) parts.push(city);
+  }
+
+  if (parts.length === 0 && currentLocation) {
+    const { street, barangay, city } = currentLocation;
+    if (street) parts.push(street);
+    if (barangay) parts.push(barangay);
+    if (city) parts.push(city);
+  }
+
+  if (parts.length > 0) return parts.join(", ");
+  if (item.placeName) return item.placeName;
+  if (item.title) return item.title;
+
+  return "Location not specified";
+};
+
+// UI bits
 const LeftBadge = () => (
   <View style={styles.leftBadge}>
-    <Icons.Wrench size={16} color={colors.green} weight="fill" />
+    <Icons.Wrench size={16} color={COLOR.green} weight="fill" />
   </View>
 );
 
@@ -89,41 +79,24 @@ const RightStatus = ({ status }: { status: ActivityItem["status"] }) => {
   );
 };
 
-
 export default function ActivityList() {
   const [data, setData] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const isLoadingRef = useRef(false);
-  const { location, formatLocationForDisplay } = useLocation();
+  const isFocusedRef = useRef(false);
+  const { location } = useLocation(); // type: LocationData | null
 
   const load = useCallback(async () => {
-    // Prevent concurrent loads
-    if (isLoadingRef.current) {
-      console.log("⏳ Load already in progress, skipping...");
-      return;
-    }
-    
+    if (isLoadingRef.current) return;
     isLoadingRef.current = true;
     setLoading(true);
     setError(null);
     try {
-      console.log("🔄 Loading activity data...");
-      // Prefer DB -> local; fall back to local cache if needed
-      const items = await forceRefreshFromDatabase().catch(async () => {
-        console.log("📦 Falling back to local cache");
-        return getActivity();
-      });
-      console.log("📊 Loaded", items.length, "items");
+      const items = await forceRefreshFromDatabase().catch(getActivity);
       setData(Array.isArray(items) ? items : []);
-    } catch (err) {
-      console.error("❌ Error loading activity:", err);
-      const isConnected = await testApiConnection();
-      if (!isConnected) {
-        setError("Cannot connect to server. Please check your network connection.");
-      } else {
-        setError(err instanceof Error ? err.message : "Failed to load data");
-      }
+    } catch {
+      setError("Failed to load data");
       setData([]);
     } finally {
       setLoading(false);
@@ -131,69 +104,78 @@ export default function ActivityList() {
     }
   }, []);
 
-
-  /* ✅ RUN ON MOUNT */
-  useEffect(() => {
-    load();
-  }, []);
-
-  /* ✅ ALSO RUN WHEN SCREEN FOCUSES */
-  useFocusEffect(
-    useCallback(() => {
-      load();
-    }, [])
-  );
-
-  /* 🔔 React to local store changes - DISABLED to prevent infinite loop */
-  // useEffect(() => {
-  //   const un = onActivityChange(() => {
-  //     // Only reload if we're not already loading
-  //     if (!isLoadingRef.current) {
-  //       load();
-  //     }
-  //   });
-  //   return () => {
-  //     if (typeof un === "function") un();
-  //   };
-  // }, []);
-
-  /* 🔌 Realtime: remove locally when DB deletes */
-  useEffect(() => {
+  // Silent refresh (doesn't show loading indicator)
+  const silentRefresh = useCallback(async () => {
+    if (isLoadingRef.current) return;
+    isLoadingRef.current = true;
     try {
-      const socket = getSocket();
-      if (!socket) return;
-      const unbind = bindAssistRealtimeDeletes(socket);
-      return unbind;
+      const items = await forceRefreshFromDatabase().catch(getActivity);
+      setData(Array.isArray(items) ? items : []);
+      setError(null);
     } catch {
-      // socket not ready; ignore
-      return;
+      // Silent fail for background refresh
+    } finally {
+      isLoadingRef.current = false;
     }
   }, []);
 
-  const newItems = useMemo(() => data.filter((i) => i.status === "pending"), [data]);
-  const recentItems = useMemo(() => data.filter((i) => i.status !== "pending"), [data]);
+  // Load on focus (covers initial mount + returning to screen)
+  useFocusEffect(
+    useCallback(() => {
+      isFocusedRef.current = true;
+      load();
+      
+      return () => {
+        isFocusedRef.current = false;
+      };
+    }, [load])
+  );
 
-  // Debug render state
-  useEffect(() => {
-    console.log("📊 Render state:", { 
-      loading, 
-      error, 
-      dataLength: data.length, 
-      newItems: newItems.length, 
-      recentItems: recentItems.length 
-    });
-  }, [loading, error, data.length, newItems.length, recentItems.length]);
+  // Auto-refresh every 0.5 seconds when focused
+  React.useEffect(() => {
+    const interval = setInterval(() => {
+      if (isFocusedRef.current) {
+        silentRefresh();
+      }
+    }, 500); // 0.5 seconds
 
+    return () => {
+      clearInterval(interval);
+    };
+  }, [silentRefresh]);
+
+  // Bind realtime server deletes/status changes
+  React.useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return;
+    const unbind = bindAssistRealtimeDeletes(socket);
+    return unbind;
+  }, []);
+
+  // Show only the latest request for each status
+  const newItems = useMemo(() => {
+    const pendingItems = data.filter((i) => i.status === "pending");
+    // Return only the most recent pending request
+    return pendingItems.length > 0 ? [pendingItems[0]] : [];
+  }, [data]);
+  
+  const recentItems = useMemo(() => {
+    const nonPendingItems = data.filter((i) => i.status !== "pending");
+    // Return only the most recent non-pending request
+    return nonPendingItems.length > 0 ? [nonPendingItems[0]] : [];
+  }, [data]);
 
   if (loading) {
     return (
       <ScreenWrapper style={{ paddingTop: 0 }}>
         <View style={styles.container}>
           <Typo size={28} fontWeight="900" style={{ marginBottom: spacingY._5 }}>
-            <Typo size={28} fontWeight="900" color={colors.green}>Activity</Typo>
+            <Typo size={28} fontWeight="900" color={COLOR.green}>
+              Activity
+            </Typo>
           </Typo>
-          <View style={styles.loadingContainer}>
-            <Typo size={16} color={colors.white} fontFamily="InterLight" fontWeight="400">
+          <View style={styles.centered}>
+            <Typo size={16} color={COLOR.white} fontFamily="InterLight" fontWeight="400">
               Loading...
             </Typo>
           </View>
@@ -207,17 +189,33 @@ export default function ActivityList() {
       <ScreenWrapper style={{ paddingTop: 0 }}>
         <View style={styles.container}>
           <Typo size={28} fontWeight="900" style={{ marginBottom: spacingY._5 }}>
-            <Typo size={28} fontWeight="900" color={colors.green}>Activity</Typo>
+            <Typo size={28} fontWeight="900" color={COLOR.green}>
+              Activity
+            </Typo>
           </Typo>
-          <View style={styles.errorContainer}>
-            <Typo size={16} color="#FF5A5A" fontFamily="InterLight" fontWeight="600" style={{ textAlign: "center" }}>
+          <View style={styles.centered}>
+            <Typo
+              size={16}
+              color={CANCEL_COLOR}
+              fontFamily="InterLight"
+              fontWeight="600"
+              style={{ textAlign: "center" }}
+            >
               Error loading data
             </Typo>
-            <Typo size={14} color={colors.neutral500} fontFamily="InterLight" fontWeight="400" style={{ textAlign: "center", marginTop: spacingY._5 }}>
+            <Typo
+              size={14}
+              color={COLOR.neutral500}
+              fontFamily="InterLight"
+              fontWeight="400"
+              style={{ textAlign: "center", marginTop: spacingY._5 }}
+            >
               {error}
             </Typo>
             <Pressable onPress={load} style={styles.retryButton}>
-              <Typo size={14} color={colors.white} fontWeight="700" fontFamily="InterLight">Retry</Typo>
+              <Typo size={14} color={COLOR.white} fontWeight="700" fontFamily="InterLight">
+                Retry
+              </Typo>
             </Pressable>
           </View>
         </View>
@@ -229,15 +227,29 @@ export default function ActivityList() {
     <ScreenWrapper style={{ paddingTop: 0 }}>
       <View style={styles.container}>
         <Typo size={28} fontWeight="900" fontFamily="Candal" style={{ marginBottom: spacingY._5 }}>
-          <Typo size={28} fontWeight="900" color={colors.green} fontFamily="Candal">Activity</Typo>
+          <Typo size={28} fontWeight="900" color={COLOR.green} fontFamily="Candal">
+            Activity
+          </Typo>
         </Typo>
 
-         {data.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Typo size={16} color={colors.neutral400} fontFamily="InterLight" fontWeight="600" style={{ textAlign: "center" }}>
+        {data.length === 0 ? (
+          <View style={styles.centered}>
+            <Typo
+              size={16}
+              color={COLOR.neutral400}
+              fontFamily="InterLight"
+              fontWeight="600"
+              style={{ textAlign: "center" }}
+            >
               No assistance requests found
             </Typo>
-            <Typo size={14} color={colors.neutral500} fontFamily="InterLight" fontWeight="400" style={{ textAlign: "center", marginTop: spacingY._5 }}>
+            <Typo
+              size={14}
+              color={COLOR.neutral500}
+              fontFamily="InterLight"
+              fontWeight="400"
+              style={{ textAlign: "center", marginTop: spacingY._5 }}
+            >
               Create a new request to see it here
             </Typo>
           </View>
@@ -247,42 +259,73 @@ export default function ActivityList() {
               <View>
                 {newItems.length > 0 && (
                   <>
-                     <Typo size={16} color={colors.white} fontFamily="InterLight" fontWeight="700" style={{ marginBottom: spacingY._7 }}>
-                       New
-                     </Typo>
+                    <Typo
+                      size={16}
+                      color={COLOR.white}
+                      fontFamily="InterLight"
+                      fontWeight="700"
+                      style={{ marginBottom: spacingY._7 }}
+                    >
+                      Waiting...
+                    </Typo>
 
-                    {newItems.map((item) => (
-                      <Pressable
-                        key={item.id}
-                        onPress={() => router.push({ pathname: "/(main)/track", params: { id: item.id } })}
-                        style={styles.row}
-                      >
-                        <LeftBadge />
-                         <View style={{ flex: 1, marginLeft: spacingX._10 }}>
-                           <Typo size={13} color={colors.green} fontFamily="Candal" fontWeight="600">
-                             Request assistance
-                           </Typo>
-                           <Typo size={15} color={colors.white} fontWeight="700" fontFamily="InterLight">
-                             {formatLocation(item, location)}
-                           </Typo>
-                           <Typo size={12} color={colors.neutral400} fontFamily="InterLight" fontWeight="300" style={{ marginTop: 2 }}>
-                             {new Date(item.createdAt).toLocaleString()}
-                           </Typo>
-                         </View>
-                        <RightStatus status={item.status} />
-                      </Pressable>
-                    ))}
+                    {newItems.map((item, ix) => {
+                      if (!item) return null;
+                      const id = getItemId(item, ix);
+                      return (
+                        <Pressable
+                          key={id}
+                          onPress={() => {
+                            // Only allow navigation to track screen if request is accepted
+                            if (item.status === "accepted") {
+                              router.push({ pathname: "/(main)/track", params: { id } });
+                            }
+                          }}
+                          style={[
+                            styles.row,
+                            item.status === "pending" && styles.disabledRow
+                          ]}
+                          disabled={item.status === "pending"}
+                        >
+                          <LeftBadge />
+                          <View style={{ flex: 1, marginLeft: spacingX._10 }}>
+                            <Typo size={13} color={COLOR.green} fontFamily="Candal" fontWeight="600">
+                              Request assistance
+                            </Typo>
+                            <Typo size={15} color={COLOR.white} fontWeight="700" fontFamily="InterLight">
+                              {formatLocation(item, location)}
+                            </Typo>
+                            <Typo
+                              size={12}
+                              color={COLOR.neutral400}
+                              fontFamily="InterLight"
+                              fontWeight="300"
+                              style={{ marginTop: 2 }}
+                            >
+                              {new Date(item.createdAt).toLocaleString()}
+                            </Typo>
+                          </View>
+                          <RightStatus status={item.status} />
+                        </Pressable>
+                      );
+                    })}
                     <View style={{ height: spacingY._12 }} />
                   </>
                 )}
 
-                 <Typo size={16} color={colors.white} fontFamily="InterLight" fontWeight="700" style={{ marginBottom: spacingY._7 }}>
-                   Recent
-                 </Typo>
+                <Typo
+                  size={16}
+                  color={COLOR.white}
+                  fontFamily="InterLight"
+                  fontWeight="700"
+                  style={{ marginBottom: spacingY._7 }}
+                >
+                  Recent
+                </Typo>
               </View>
             }
             data={recentItems}
-            keyExtractor={(i) => i.id}
+            keyExtractor={(i, ix) => i ? getItemId(i, ix) : `undefined_${ix}`}
             contentContainerStyle={{ paddingBottom: spacingY._20 }}
             removeClippedSubviews
             maxToRenderPerBatch={10}
@@ -299,36 +342,51 @@ export default function ActivityList() {
                 progressViewOffset={0}
               />
             }
-            renderItem={({ item }) => {
+            renderItem={({ item, index }) => {
+              if (!item) return null;
+              const id = getItemId(item, index);
               const isCanceled = item.status === "canceled";
               return (
                 <View style={styles.row}>
                   <LeftBadge />
-                   <View style={{ flex: 1, marginLeft: spacingX._10 }}>
-                     <Typo size={15} color={colors.white} fontWeight="700" fontFamily="InterLight">
-                       {formatLocation(item, location)}
-                     </Typo>
+                  <View style={{ flex: 1, marginLeft: spacingX._10 }}>
+                    <Typo size={15} color={COLOR.white} fontWeight="700" fontFamily="InterLight">
+                      {formatLocation(item, location)}
+                    </Typo>
 
-                     <Typo size={12} color={colors.neutral400} fontFamily="InterLight" fontWeight="300" style={{ marginTop: 2 }}>
-                       {new Date(item.createdAt).toLocaleString()}
-                     </Typo>
+                    <Typo
+                      size={12}
+                      color={COLOR.neutral400}
+                      fontFamily="InterLight"
+                      fontWeight="300"
+                      style={{ marginTop: 2 }}
+                    >
+                      {new Date(item.createdAt).toLocaleString()}
+                    </Typo>
 
-                    {/* Rate link under time/date */}
                     {!isCanceled && (
                       <Pressable
-                        onPress={() => router.push({ pathname: "/(main)/rate", params: { id: item.id } })}
+                        onPress={() => router.push({ pathname: "/(main)/rate", params: { id } })}
                         style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 }}
                         accessibilityRole="button"
                       >
-                         <Typo size={12} color={colors.neutral300} fontFamily="InterLight" fontWeight="400">Rate</Typo>
-                        <Icons.ArrowRight size={14} color={colors.neutral300} />
+                        <Typo size={12} color={COLOR.neutral300} fontFamily="InterLight" fontWeight="400">
+                          Rate
+                        </Typo>
+                        <Icons.ArrowRight size={14} color={COLOR.neutral300} />
                       </Pressable>
                     )}
 
                     {isCanceled && (
-                       <Typo size={12} color={CANCEL_COLOR} fontFamily="InterLight" style={{ marginTop: 4 }} fontWeight="600">
-                         Request canceled
-                       </Typo>
+                      <Typo
+                        size={12}
+                        color={CANCEL_COLOR}
+                        fontFamily="InterLight"
+                        style={{ marginTop: 4 }}
+                        fontWeight="600"
+                      >
+                        Request canceled
+                      </Typo>
                     )}
                   </View>
                   <RightStatus status={item.status} />
@@ -344,41 +402,50 @@ export default function ActivityList() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: BG_SCREEN, paddingHorizontal: spacingX._15 },
-  loadingContainer: {
-    flex: 1, justifyContent: "center", alignItems: "center", paddingVertical: spacingY._20,
-  },
-  emptyContainer: {
-    flex: 1, justifyContent: "center", alignItems: "center", paddingVertical: spacingY._20,
-  },
-  errorContainer: {
-    flex: 1, justifyContent: "center", alignItems: "center", paddingVertical: spacingY._20,
+  centered: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingVertical: spacingY._20,
   },
   retryButton: {
     marginTop: spacingY._10,
-    backgroundColor: colors.green,
+    backgroundColor: COLOR.green,
     paddingHorizontal: spacingX._20,
     paddingVertical: spacingY._8,
-    borderRadius: radius._12 || 12,
+    borderRadius: (radius as any)._12 ?? 12,
   },
   row: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: BG_CARD,
-    borderRadius: radius._15,
+    borderRadius: (radius as any)._15 ?? 15,
     paddingHorizontal: spacingX._15,
     paddingVertical: spacingY._10,
     marginBottom: spacingY._7,
   },
   leftBadge: {
-    width: 32, height: 32, borderRadius: 16,
-    alignItems: "center", justifyContent: "center",
-    borderWidth: 1.5, borderColor: colors.green, backgroundColor: "#0F1115",
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1.5,
+    borderColor: COLOR.green,
+    backgroundColor: "#0F1115",
   },
   rightDot: { width: 10, height: 10, borderRadius: 5 },
-  rightDotGreen: { backgroundColor: colors.green },
+  rightDotGreen: { backgroundColor: COLOR.green },
   rightDotRed: { backgroundColor: CANCEL_COLOR },
   rightCheck: {
-    width: 22, height: 22, borderRadius: 11,
-    backgroundColor: colors.green, alignItems: "center", justifyContent: "center",
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: COLOR.green,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  disabledRow: {
+    opacity: 0.6,
   },
 });

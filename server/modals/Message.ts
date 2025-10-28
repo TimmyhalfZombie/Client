@@ -1,6 +1,7 @@
 // server\modals\Message.ts
 
 import mongoose from "mongoose";
+import { getCustomerConnection } from "../config/db";
 
 const messageSchema = new mongoose.Schema(
   {
@@ -35,6 +36,6 @@ const messageSchema = new mongoose.Schema(
   }
 );
 
-const Message = mongoose.model("Message", messageSchema);
-
-export default Message;
+// Use customer connection for Message model
+const customer = getCustomerConnection();
+export default customer.model("Message", messageSchema);

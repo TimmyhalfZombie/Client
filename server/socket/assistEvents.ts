@@ -4,6 +4,7 @@ import Conversation from "../modals/Conversation";
 import ConversationMeta from "../modals/ConversationMeta";
 import User from "../modals/User";
 import Message from "../modals/Message";
+import Rating from "../modals/Rating";
 
 /** Helpers */
 async function ensureDirectConversation(io: SocketIOServer, a: string, b: string) {
@@ -187,14 +188,31 @@ export function registerAssistEvents(io: SocketIOServer, socket: Socket) {
 
       console.log(`✅ Request ${id} accepted by operator ${operatorId}`);
 
-      // Notify requester (customer)
+      // Get operator details for customer notification
+      const operator = await User.findById(operatorId)
+        .select("name avatar email")
+        .lean();
+
+      // Notify requester (customer) with operator details
       for (const [sid, s] of io.sockets.sockets) {
         const uid = String((s.data as any)?.userId || "");
         if (uid === String(req.userId)) {
           console.log(`📢 Notifying customer ${req.userId} about approved request`);
           io.to(sid).emit("assist:approved", {
             success: true,
-            data: { id },
+            data: { 
+              id,
+              operatorName: operator?.name || "Operator",
+              operatorId: operatorId,
+              operatorAvatar: operator?.avatar || null,
+              operator: {
+                id: operatorId,
+                name: operator?.name || "Operator",
+                avatar: operator?.avatar || null,
+                phone: operator?.phone || null
+              },
+              estimatedTimeWindow: "10:15 - 10:25 AM" // Default ETA
+            },
           });
         }
       }
@@ -322,6 +340,286 @@ export function registerAssistEvents(io: SocketIOServer, socket: Socket) {
       console.error("assist:status error:", e);
     }
   });
+
+  // Operator status updates (en route, arrived, etc.)
+  socket.on("operator:statusUpdate", async (data: {
+    assistRequestId: string;
+    status: "en_route" | "arrived" | "working" | "completed";
+    estimatedTime?: string;
+    location?: { lat: number; lng: number };
+  }) => {
+    try {
+      const { assistRequestId, status, estimatedTime, location } = data;
+      const operatorId = String((socket.data as any)?.userId || "");
+
+      // Find the assist request and customer
+      const assistRequest = await AssistRequest.findById(assistRequestId)
+        .select("userId assignedTo")
+        .lean();
+
+      if (!assistRequest || String(assistRequest.assignedTo) !== operatorId) {
+        return socket.emit("operator:statusUpdate", {
+          success: false,
+          msg: "Request not found or not assigned to you"
+        });
+      }
+
+      // Get operator details
+      const operator = await User.findById(operatorId)
+        .select("name avatar")
+        .lean();
+
+      // Notify customer about operator status
+      for (const [sid, s] of io.sockets.sockets) {
+        const uid = String((s.data as any)?.userId || "");
+        if (uid === String(assistRequest.userId)) {
+          io.to(sid).emit("operator:statusUpdate", {
+            success: true,
+            data: {
+              status,
+              operatorName: operator?.name || "Operator",
+              operatorId,
+              estimatedTime,
+              location,
+              timestamp: new Date().toISOString()
+            }
+          });
+        }
+      }
+
+      socket.emit("operator:statusUpdate", { success: true });
+    } catch (e) {
+      console.error("operator:statusUpdate error:", e);
+      socket.emit("operator:statusUpdate", { success: false, msg: "Failed to update status" });
+    }
+  });
+
+  // 📍 Operator sends real-time location update
+  socket.on("operator:locationUpdate", async (data: {
+    assistRequestId: string;
+    lat: number;
+    lng: number;
+    address?: string;
+  }) => {
+    try {
+      const { assistRequestId, lat, lng, address } = data;
+      const operatorId = String((socket.data as any)?.userId || "");
+
+      if (!assistRequestId || !lat || !lng) {
+        return socket.emit("operator:locationUpdate", {
+          success: false,
+          msg: "Missing required fields"
+        });
+      }
+
+      // Update operator location in database
+      const request = await AssistRequest.findOneAndUpdate(
+        { _id: assistRequestId, assignedTo: operatorId },
+        {
+          operatorCurrentLocation: {
+            lat,
+            lng,
+            address: address || `${lat.toFixed(4)}, ${lng.toFixed(4)}`,
+            timestamp: new Date()
+          },
+          lastLocationUpdate: new Date()
+        },
+        { new: true }
+      ).select("userId operatorCurrentLocation").lean();
+
+      if (!request) {
+        return socket.emit("operator:locationUpdate", {
+          success: false,
+          msg: "Request not found or not assigned to you"
+        });
+      }
+
+      console.log(`📍 Operator ${operatorId} location updated for request ${assistRequestId}`);
+
+      // Broadcast to customer
+      for (const [sid, s] of io.sockets.sockets) {
+        const uid = String((s.data as any)?.userId || "");
+        if (uid === String(request.userId)) {
+          io.to(sid).emit("operator:locationChanged", {
+            success: true,
+            data: {
+              assistRequestId,
+              operatorLocation: request.operatorCurrentLocation,
+            }
+          });
+          console.log(`📡 Location broadcasted to customer ${uid}`);
+        }
+      }
+
+      socket.emit("operator:locationUpdate", { success: true });
+    } catch (e) {
+      console.error("operator:locationUpdate error:", e);
+      socket.emit("operator:locationUpdate", { success: false, msg: "Failed to update location" });
+    }
+  });
+
+  // 📍 Customer sends real-time location update
+  socket.on("customer:locationUpdate", async (data: {
+    assistRequestId: string;
+    lat: number;
+    lng: number;
+    address?: string;
+  }) => {
+    try {
+      const { assistRequestId, lat, lng, address } = data;
+      const customerId = String((socket.data as any)?.userId || "");
+
+      if (!assistRequestId || !lat || !lng) {
+        return socket.emit("customer:locationUpdate", {
+          success: false,
+          msg: "Missing required fields"
+        });
+      }
+
+      // Update customer location in database
+      const request = await AssistRequest.findOneAndUpdate(
+        { _id: assistRequestId, userId: customerId },
+        {
+          customerCurrentLocation: {
+            lat,
+            lng,
+            address: address || `${lat.toFixed(4)}, ${lng.toFixed(4)}`,
+            timestamp: new Date()
+          },
+          lastLocationUpdate: new Date()
+        },
+        { new: true }
+      ).select("assignedTo customerCurrentLocation").lean();
+
+      if (!request) {
+        return socket.emit("customer:locationUpdate", {
+          success: false,
+          msg: "Request not found"
+        });
+      }
+
+      console.log(`📍 Customer ${customerId} location updated for request ${assistRequestId}`);
+
+      // Broadcast to operator (if assigned)
+      if (request.assignedTo) {
+        for (const [sid, s] of io.sockets.sockets) {
+          const uid = String((s.data as any)?.userId || "");
+          if (uid === String(request.assignedTo)) {
+            io.to(sid).emit("customer:locationChanged", {
+              success: true,
+              data: {
+                assistRequestId,
+                customerLocation: request.customerCurrentLocation,
+              }
+            });
+            console.log(`📡 Location broadcasted to operator ${uid}`);
+          }
+        }
+      }
+
+      socket.emit("customer:locationUpdate", { success: true });
+    } catch (e) {
+      console.error("customer:locationUpdate error:", e);
+      socket.emit("customer:locationUpdate", { success: false, msg: "Failed to update location" });
+    }
+  });
+
+  // ⭐ Handle rating submission
+  socket.on("rating:submit", async (data: {
+    assistRequestId: string;
+    rating: number;
+    comment?: string;
+  }) => {
+    try {
+      const { assistRequestId, rating, comment } = data;
+      const customerId = String((socket.data as any)?.userId || "");
+
+      if (!assistRequestId || !rating || rating < 1 || rating > 5) {
+        return socket.emit("rating:submit", {
+          success: false,
+          msg: "Invalid rating data"
+        });
+      }
+
+      // Find the assist request
+      const request = await AssistRequest.findOne({ 
+        _id: assistRequestId, 
+        userId: customerId 
+      }).populate("assignedTo", "name avatar").lean();
+
+      if (!request) {
+        return socket.emit("rating:submit", {
+          success: false,
+          msg: "Request not found"
+        });
+      }
+
+      if (request.status !== "done" && request.status !== "completed") {
+        return socket.emit("rating:submit", {
+          success: false,
+          msg: "Request must be completed before rating"
+        });
+      }
+
+      if (!request.assignedTo) {
+        return socket.emit("rating:submit", {
+          success: false,
+          msg: "No operator assigned to this request"
+        });
+      }
+
+      // Check if already rated
+      const existingRating = await Rating.findOne({ assistRequestId });
+      if (existingRating) {
+        return socket.emit("rating:submit", {
+          success: false,
+          msg: "Request already rated"
+        });
+      }
+
+      // Create rating
+      const newRating = await Rating.create({
+        assistRequestId,
+        customerId,
+        operatorId: request.assignedTo._id,
+        rating,
+        comment: comment || undefined
+      });
+
+      console.log(`⭐ Rating submitted: ${rating} stars for operator ${request.assignedTo._id}`);
+
+      // Notify operator about the rating
+      for (const [sid, s] of io.sockets.sockets) {
+        const uid = String((s.data as any)?.userId || "");
+        if (uid === String(request.assignedTo._id)) {
+          io.to(sid).emit("rating:received", {
+            success: true,
+            data: {
+              assistRequestId,
+              rating: newRating.rating,
+              comment: newRating.comment,
+              customerId,
+              customerName: request.customerName,
+              createdAt: newRating.createdAt
+            }
+          });
+          console.log(`📡 Rating notification sent to operator ${uid}`);
+        }
+      }
+
+      socket.emit("rating:submit", { 
+        success: true, 
+        data: {
+          rating: newRating.rating,
+          comment: newRating.comment,
+          operatorName: (request.assignedTo as any).name
+        }
+      });
+    } catch (e) {
+      console.error("rating:submit error:", e);
+      socket.emit("rating:submit", { success: false, msg: "Failed to submit rating" });
+    }
+  });
 }
 
 /**
@@ -352,10 +650,10 @@ Vehicle Type: ${requestData.vehicleType}
 Plate Number: ${requestData.plateNumber}
 Other infos: ${requestData.otherInfos}`;
 
-    // Create the message in database
+    // Create the message in database - OPERATOR sends the first message
     const message = await Message.create({
       conversationId: conversationId,
-      senderId: assistRequest.userId, // Customer as sender
+      senderId: operatorId, // OPERATOR as sender (not customer)
       content: messageContent,
       type: "text",
       isSystemMessage: true, // Mark as system message
@@ -392,5 +690,134 @@ Other infos: ${requestData.otherInfos}`;
 
   } catch (error) {
     console.error("❌ Error sending request data to conversation:", error);
+  }
+}
+
+/**
+ * 🔄 SERVER AUTO-REFRESH (0.5 seconds)
+ * Periodically broadcasts database state to all connected clients
+ * Ensures clients stay synchronized even if they miss socket events
+ */
+let autoRefreshInterval: NodeJS.Timeout | null = null;
+let lastRequestsSnapshot: string = "";
+let lastUserRequestsSnapshot: Map<string, string> = new Map();
+
+export function startAutoRefresh(io: SocketIOServer) {
+  // Prevent duplicate intervals
+  if (autoRefreshInterval) {
+    console.log("⚠️ Auto-refresh already running");
+    return;
+  }
+
+  console.log("🔄 Starting server auto-refresh (0.5s interval)");
+
+  autoRefreshInterval = setInterval(async () => {
+    try {
+      // 1️⃣ Broadcast pending requests to operators
+      const pendingRequests = await AssistRequest.find({ status: "pending" })
+        .sort({ createdAt: -1 })
+        .limit(50)
+        .populate({ path: "userId", select: "name avatar email" })
+        .lean();
+
+      // Check if pending requests changed
+      const currentSnapshot = JSON.stringify(pendingRequests.map(r => ({
+        id: String(r._id),
+        status: r.status,
+        updatedAt: r.updatedAt
+      })));
+
+      if (currentSnapshot !== lastRequestsSnapshot) {
+        lastRequestsSnapshot = currentSnapshot;
+        
+        // Only broadcast to operators room if there are changes
+        const formattedRequests = pendingRequests.map((req) => ({
+          id: String(req._id),
+          status: req.status,
+          customerName: req.customerName || (req as any).userId?.name || "Customer",
+          customerEmail: req.customerEmail || (req as any).userId?.email || "",
+          customerPhone: req.customerPhone || "",
+          vehicle: req.vehicle,
+          location: req.location,
+          createdAt: req.createdAt,
+          updatedAt: req.updatedAt,
+        }));
+
+        io.to("operators").emit("assist:refresh", {
+          success: true,
+          data: formattedRequests,
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      // 2️⃣ Broadcast status updates to individual customers
+      const allRequests = await AssistRequest.find({
+        status: { $in: ["pending", "accepted", "completed", "canceled"] },
+        updatedAt: { $gte: new Date(Date.now() - 5000) }, // Only recent updates (last 5 seconds)
+      })
+        .populate({ path: "assignedTo", select: "name avatar email" })
+        .lean();
+
+      for (const req of allRequests) {
+        const userId = String(req.userId);
+        const requestSnapshot = JSON.stringify({
+          id: String(req._id),
+          status: req.status,
+          assignedTo: req.assignedTo,
+          updatedAt: req.updatedAt,
+        });
+
+        const lastSnapshot = lastUserRequestsSnapshot.get(`${userId}_${req._id}`);
+
+        if (requestSnapshot !== lastSnapshot) {
+          lastUserRequestsSnapshot.set(`${userId}_${req._id}`, requestSnapshot);
+
+          // Find customer's socket and send update
+          for (const [sid, s] of io.sockets.sockets) {
+            const uid = String((s.data as any)?.userId || "");
+            if (uid === userId) {
+              io.to(sid).emit("assist:statusUpdate", {
+                success: true,
+                data: {
+                  id: String(req._id),
+                  status: req.status,
+                  assignedTo: req.assignedTo ? {
+                    id: String((req.assignedTo as any)._id || req.assignedTo),
+                    name: (req.assignedTo as any)?.name || "Operator",
+                    avatar: (req.assignedTo as any)?.avatar || null,
+                  } : null,
+                  updatedAt: req.updatedAt,
+                  timestamp: new Date().toISOString(),
+                },
+              });
+            }
+          }
+        }
+      }
+
+      // Cleanup old snapshots (prevent memory leak)
+      if (lastUserRequestsSnapshot.size > 1000) {
+        const entries = Array.from(lastUserRequestsSnapshot.entries());
+        lastUserRequestsSnapshot = new Map(entries.slice(-500)); // Keep last 500
+      }
+
+    } catch (error) {
+      console.error("❌ Auto-refresh error:", error);
+    }
+  }, 500); // 0.5 seconds
+
+  console.log("✅ Server auto-refresh started");
+}
+
+/**
+ * Stop auto-refresh (cleanup on server shutdown)
+ */
+export function stopAutoRefresh() {
+  if (autoRefreshInterval) {
+    clearInterval(autoRefreshInterval);
+    autoRefreshInterval = null;
+    lastRequestsSnapshot = "";
+    lastUserRequestsSnapshot.clear();
+    console.log("🛑 Server auto-refresh stopped");
   }
 }

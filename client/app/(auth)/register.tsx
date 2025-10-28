@@ -109,14 +109,19 @@ const Register = () => {
     const low = "abcdefghijkmnopqrstuvwxyz";
     const num = "23456789";
     const all = upp + low + num;
-    const pick = (s: string) => s[Math.floor(Math.random() * s.length)];
-    let out = pick(upp) + pick(low) + pick(num);
+    const pick = (s: string): string => {
+      if (!s) return ""; // guard against empty sets
+      return s.charAt(Math.floor(Math.random() * s.length));
+    };
+    
+    let out = `${pick(upp)}${pick(low)}${pick(num)}`;
     for (let i = out.length; i < len; i++) out += pick(all);
+    
     out = out
       .split("")
       .sort(() => Math.random() - 0.5)
       .join("");
-
+    
     setValue("password", out, { shouldValidate: true });
     setPassword(out);
     passwordRef.current = out;

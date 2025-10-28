@@ -41,7 +41,7 @@ export function registerChatEvents(io: SocketIOServer, socket: Socket) {
         .lean();
 
       const metaMap = new Map<string, number>();
-      metas.forEach((m) =>
+      metas.forEach((m: any) =>
         metaMap.set(m.conversationId.toString(), m.unreadCount ?? 0)
       );
 
@@ -61,33 +61,35 @@ export function registerChatEvents(io: SocketIOServer, socket: Socket) {
   });
 
   /** ================= newConversation ================= */
+54  /** Creates direct 1-on-1 conversation between customer and operator */
   socket.on("newConversation", async (data) => {
     try {
-      if (data.type == "direct") {
-        const existingConversation = await Conversation.findOne({
-          type: "direct",
-          participants: { $all: data.participants, $size: 2 },
-        })
-          .populate({ path: "participants", select: "name avatar email" })
-          .lean();
+      // Check if direct conversation already exists between these 2 participants
+      const existingConversation = await Conversation.findOne({
+        type: "direct",
+        participants: { $all: data.participants, $size: 2 },
+      })
+        .populate({ path: "participants", select: "name avatar email" })
+        .lean();
 
-        if (existingConversation) {
-          socket.emit("newConversation", {
-            success: true,
-            data: { ...existingConversation, isNew: false, unreadCount: 0 },
-          });
-          return;
-        }
+      if (existingConversation) {
+        socket.emit("newConversation", {
+          success: true,
+          data: { ...existingConversation, isNew: false, unreadCount: 0 },
+        });
+        return;
       }
 
+      // Create new direct conversation (customer ↔ operator)
       const conversation = await Conversation.create({
-        type: data.type,
+        type: "direct",
         participants: data.participants,
         name: data.name || "",
         avatar: data.avatar || "",
         createdBy: socket.data.userId,
       });
 
+      // Initialize conversation metadata for both participants
       await Promise.all(
         data.participants.map((uid: string) =>
           ConversationMeta.findOneAndUpdate(
@@ -98,11 +100,13 @@ export function registerChatEvents(io: SocketIOServer, socket: Socket) {
         )
       );
 
+      // Join both participants to the conversation room
       const connectedSockets = Array.from(io.sockets.sockets.values()).filter(
         (s) => data.participants.map(String).includes(String(s.data.userId))
       );
       connectedSockets.forEach((s) => s.join(conversation._id.toString()));
 
+      // Send populated conversation to both participants
       const populatedConversation = await Conversation.findById(
         conversation._id
       )

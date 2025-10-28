@@ -1,38 +1,7 @@
 // client/services/assistService.ts
 import { API_URL } from "@/constants";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-
-export interface AssistRequest {
-  _id: string;
-  userId: string;
-  title?: string;
-  placeName?: string;
-  status: "pending" | "accepted" | "done" | "canceled";
-  assignedTo?: string;
-  customerName?: string;
-  customerEmail?: string;
-  customerPhone?: string;
-  vehicle?: any;
-  location?: {
-    type: string;
-    coordinates: number[];
-    address?: string;
-    accuracy?: number;
-  };
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface User {
-  _id: string;
-  name: string;
-  avatar?: string;
-  email: string;
-}
-
-export interface AssistRequestWithUser extends Omit<AssistRequest, 'userId'> {
-  userId: User;
-}
+import { AssistRequest, User, AssistRequestWithUser } from "@/types";
 
 class AssistService {
   private async getAuthHeaders() {
@@ -94,7 +63,7 @@ class AssistService {
     }
   }
 
-  async rateAssistRequest(id: string, rating: number, comment?: string): Promise<boolean> {
+  async rateAssistRequest(id: string, rating: number, comment?: string): Promise<{ success: boolean; data?: any; error?: string }> {
     try {
       const headers = await this.getAuthHeaders();
       const response = await fetch(`${API_URL}/api/assist/${id}/rate`, {
@@ -103,15 +72,25 @@ class AssistService {
         body: JSON.stringify({ rating, comment }),
       });
 
+      const data = await response.json();
+      
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        return {
+          success: false,
+          error: data.msg || `HTTP error! status: ${response.status}`
+        };
       }
 
-      const data = await response.json();
-      return data.success;
+      return {
+        success: true,
+        data: data.data
+      };
     } catch (error) {
       console.error("Error rating assist request:", error);
-      return false;
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error"
+      };
     }
   }
 

@@ -93,7 +93,6 @@ export type AvatarProps = {
   size?: number;
   uri: string | null;
   style?: ViewStyle;
-  isGroup?: boolean;
 };
 
 export type HeaderProps = {
@@ -106,20 +105,19 @@ export type HeaderProps = {
 export type ConversationListItemProps = {
   item: ConversationProps;
   showDivider: boolean;
-  isGroup?: boolean;
   router: Router;
 };
 
 export type ConversationProps = {
   _id: string;
-  type: "direct" | "group";
+  type: "direct"; // Only direct 1-on-1 messaging (customer ↔ operator)
   avatar: string | null;
   participants: {
     _id: string;
     name: string;
     avatar: string;
     email: string;
-  }[];
+  }[]; // Always 2 participants [customer, operator]
   name?: string;
   lastMessage?: {
     _id: string;
@@ -146,3 +144,113 @@ export type MessageProps = {
   isMe?: boolean;
   createdAt: string;
 };
+
+// Assist Request Types (moved from assistService.ts)
+export interface AssistRequest {
+  _id: string;
+  userId: string;
+  title?: string;
+  placeName?: string;
+  status: "pending" | "accepted" | "done" | "canceled";
+  assignedTo?: string;
+  customerName?: string;
+  customerEmail?: string;
+  customerPhone?: string;
+  vehicle?: any;
+  location?: {
+    type: string;
+    coordinates: number[];
+    address?: string;
+    accuracy?: number;
+  };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface User {
+  _id: string;
+  name: string;
+  avatar?: string;
+  email: string;
+}
+
+export interface AssistRequestWithUser extends Omit<AssistRequest, 'userId'> {
+  userId: User;
+}
+
+// Activity Store Types (moved from activityStore.ts)
+export type ActivityItem = {
+  id: string; // may be a local temp id OR the server _id
+  title: string;
+  placeName?: string;
+  createdAt: string;
+  status: "pending" | "accepted" | "done" | "canceled";
+  meta?: { assistId?: string | null; operator?: any; [k: string]: any };
+  location?: {
+    street?: string;
+    barangay?: string;
+    city?: string;
+  };
+};
+
+// Operator Request Manager Types (moved from OperatorRequestManager.tsx)
+export interface AssistRequestData {
+  id: string;
+  user: {
+    id: string;
+    name: string;
+    avatar?: string;
+  };
+  vehicle: {
+    model: string;
+    plate: string;
+    notes?: string;
+  };
+  location: {
+    lat: number;
+    lng: number;
+    address: string;
+  };
+  createdAt: string;
+}
+
+export interface OperatorRequestManagerProps {
+  onRequestAccepted?: (requestId: string) => void;
+  onRequestRemoved?: (requestId: string, takenBy: string) => void;
+}
+
+// Route Hook Types (moved from useRoute.ts)
+export type Step = {
+  instruction: string;
+  distance: number;
+  duration: number;
+};
+
+// EnRoute Manager Types (moved from EnRouteManager.tsx)
+export type OperatorStatusKind = "en_route" | "arrived" | "working" | "completed";
+
+export type OperatorInfo = {
+  id?: string;
+  name?: string;
+  avatar?: string | null;
+  phone?: string;
+};
+
+export type OperatorStatusState = {
+  visible: boolean;
+  assistId?: string | null;
+  status: OperatorStatusKind;
+  eta?: string;
+  operator?: OperatorInfo;
+};
+
+// Assist Chat Service Types (moved from assistChatService.ts)
+export interface AssistChatInfo {
+  assistRequestId: string;
+  customerId: string;
+  operatorId: string;
+  customerName: string;
+  operatorName: string;
+  vehicleInfo?: string;
+  locationInfo?: string;
+}

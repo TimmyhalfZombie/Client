@@ -92,9 +92,9 @@ export function registerMessageEvents(io: SocketIOServer, socket: Socket) {
           updatedAt: new Date(),
         });
 
-        // Find conversation participants
+        // Find conversation participants (always direct 1-on-1)
         const conversation = await Conversation.findById(conversationId)
-          .select("type name avatar participants")
+          .select("name avatar participants")
           .lean();
 
         let otherParticipantIds: string[] = [];
@@ -218,7 +218,7 @@ export function registerMessageEvents(io: SocketIOServer, socket: Socket) {
                 conversationId,
                 name: senderName,
                 avatar: senderAvatar,
-                type: conversation.type,
+                type: "direct", // Always direct 1-on-1 (customer ↔ operator)
                 participants: participantsMin,
               },
             });

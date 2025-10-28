@@ -19,20 +19,20 @@ import {
   FillLayer,
   LineLayer,
   SymbolLayer,
-  MarkerView, // ✅ use MarkerView for reliable RN views over the map
+  MarkerView,
 } from "@maplibre/maplibre-react-native";
 import {
   DEFAULT_ZOOM,
   ILOILO_CENTER,
-  GEOAPIFY_RASTER_STYLE,
+  MAPTILER_STYLE,
   PANAY_MAX_BOUNDS,
   AOI_GEOJSON_URL,
-  GEOAPIFY_KEY,
+  MAPTILER_KEY,
 } from "@/constants/map";
 import LocationHeader from "@/components/LocationHeader";
 import RequestStepper from "@/components/RequestStepper";
 import { useCurrentAddress } from "@/hooks/useCurrentAddress";
-import { BlurView } from "expo-blur";
+import { LinearGradient } from "expo-linear-gradient";
 import RequestStatusOverlay from "@/components/RequestStatusOverlay";
 import { addActivityItem, updateActivityItem } from "@/utils/activityStore";
 import { getSocket } from "@/socket/socket";
@@ -42,10 +42,12 @@ import {
   onAssistStatus,
 } from "@/socket/socketEvents";
 import Avatar from "@/components/Avatar";
-
-// NEW: get tab bar height & safe-area to render behind the navbar but keep overlays above it
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { API_URL } from "@/constants";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import EnRouteManager from "@/components/EnRouteManager";
+import { type OperatorStatusState, type OperatorInfo, type OperatorStatusKind } from "@/types";
 
 /* ---------- DEV: silence MapLibre spam EARLY (before first render) ---------- */
 if (__DEV__) {
@@ -105,39 +107,6 @@ const OSM_FALLBACK_RASTER_STYLE: any = {
 };
 // -----------------------------------------------------------------------------
 
-// Liquid Glass (SDK 54+). Safe import & fallback.
-let GlassView: any, isLiquidGlassAvailable: (() => boolean) | undefined;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const m = require("expo-glass-effect");
-  GlassView = m.GlassView;
-  isLiquidGlassAvailable = m.isLiquidGlassAvailable;
-} catch {}
-
-const LiquidGlassBackdrop: React.FC<{ opacity?: number }> = ({
-  opacity = 0.55,
-}) => {
-  const canLiquid =
-    Platform.OS === "ios" && GlassView && (isLiquidGlassAvailable?.() ?? true);
-  if (canLiquid) {
-    return (
-      <GlassView
-        pointerEvents="none"
-        glassEffectStyle="regular"
-        style={[StyleSheet.absoluteFill, { opacity }]}
-      />
-    );
-  }
-  return (
-    <BlurView
-      pointerEvents="none"
-      tint="dark"
-      intensity={20}
-      style={[StyleSheet.absoluteFill, { opacity }]}
-    />
-  );
-};
-
 const Home = () => {
   const tabBarHeight = useBottomTabBarHeight();
   const insets = useSafeAreaInsets();
@@ -169,13 +138,22 @@ const Home = () => {
     caption: undefined,
   });
 
-  // Request status for RequestStepper
+  // Request status for RequestStepper (kept for compatibility/hooks)
   const [requestStatus, setRequestStatus] = useState<"idle" | "requesting" | "accepted">("idle");
   const [isRequesting, setIsRequesting] = useState(false);
 
   // local refs to correlate ack/approval
   const pendingLocalIdRef = useRef<string | null>(null);
   const serverAssistIdRef = useRef<string | null>(null);
+
+  // 🔔 Operator status for card that replaces the stepper
+  const [operatorStatus, setOperatorStatus] = useState<OperatorStatusState>({
+    visible: false,
+    assistId: null,
+    status: "en_route",
+    eta: undefined,
+    operator: undefined,
+  });
 
   // Try to disable MapLibre bridge logs as well
   useEffect(() => {
@@ -187,9 +165,9 @@ const Home = () => {
   }, []);
 
   // ---- Reachability probe ----
-  const verifyGeoapifyReachable = useCallback(async () => {
+  const verifyMapTilerReachable = useCallback(async () => {
     try {
-      const testUrl = `https://maps.geoapify.com/v1/tile/osm-bright/1/1/1.png?apiKey=${GEOAPIFY_KEY}`;
+      const testUrl = `https://api.maptiler.com/maps/streets-v2/1/1/1.png?key=${MAPTILER_KEY}`;
       const res = await fetch(testUrl, { method: "GET" });
       return res.ok;
     } catch {
@@ -199,19 +177,19 @@ const Home = () => {
 
   useEffect(() => {
     (async () => {
-      const ok = await verifyGeoapifyReachable();
-      setMapStyle(ok ? GEOAPIFY_RASTER_STYLE : OSM_FALLBACK_RASTER_STYLE);
+      const ok = await verifyMapTilerReachable();
+      setMapStyle(ok ? MAPTILER_STYLE : OSM_FALLBACK_RASTER_STYLE);
       if (!ok) {
         if (Platform.OS === "android")
           ToastAndroid.show(
-            "Geoapify unreachable — using OSM fallback",
+            "MapTiler unreachable — using OSM fallback",
             ToastAndroid.LONG
           );
         else
-          Alert.alert("Map tiles", "Geoapify unreachable — using OSM fallback");
+          Alert.alert("Map tiles", "MapTiler unreachable — using OSM fallback");
       }
     })();
-  }, [verifyGeoapifyReachable]);
+  }, [verifyMapTilerReachable]);
 
   // Initial camera (once)
   useEffect(() => {
@@ -296,7 +274,7 @@ const Home = () => {
       }
     });
 
-    // 5) Listen for server events
+    // 5) Listen for server events (scoped for this request, then auto-unsub)
     const onApproved = async (evt: any) => {
       const srvId = String(evt?.data?.id || "");
       if (!evt?.success || !srvId) return;
@@ -304,6 +282,25 @@ const Home = () => {
 
       const targetLocalId = pendingLocalIdRef.current;
       if (targetLocalId) await updateActivityItem(targetLocalId, { status: "accepted" });
+
+      // operator details from approval payload (if present)
+      const operator: OperatorInfo | undefined = evt?.data?.operator
+        ? {
+            id: String(evt.data.operator.id ?? evt.data.operator._id ?? ""),
+            name: evt.data.operator.name,
+            avatar: evt.data.operator.avatar ?? null,
+            phone: evt.data.operator.phone,
+          }
+        : undefined;
+
+      setOperatorStatus((s: OperatorStatusState) => ({
+        ...s,
+        visible: true,                    // << show card (replaces stepper)
+        assistId: srvId,
+        status: "en_route",
+        eta: evt?.data?.estimatedTimeWindow || "10:15 - 10:25 AM",
+        operator,
+      }));
 
       setOverlay({
         visible: true,
@@ -314,6 +311,7 @@ const Home = () => {
       setIsRequesting(false);
       setTimeout(() => setOverlay((o) => ({ ...o, visible: false })), 1600);
 
+      // Unsubscribe these scoped listeners after acceptance
       onAssistApproved(onApproved, true);
       onAssistStatus(onStatus, true);
     };
@@ -333,11 +331,182 @@ const Home = () => {
       const localStatus = map[raw] || "pending";
       const targetLocalId = pendingLocalIdRef.current;
       if (targetLocalId) await updateActivityItem(targetLocalId, { status: localStatus });
+
+      // hide card upon completion/cancel
+      if (raw === "completed" || raw === "cancelled" || raw === "canceled" || raw === "rejected") {
+        setOperatorStatus((s: OperatorStatusState) => ({ ...s, visible: false }));
+        setRequestStatus("idle");
+      }
     };
 
     onAssistApproved(onApproved);
     onAssistStatus(onStatus);
   };
+
+  // 🔔 GLOBAL listener for assist approval (always active, not scoped to request)
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return;
+
+    const handleGlobalAssistApproved = async (evt: any) => {
+      console.log("🔔 GLOBAL: assist:approved event received", evt);
+      
+      const srvId = String(evt?.data?.id || "");
+      if (!evt?.success || !srvId) return;
+
+      // Check if this is for our current request
+      if (serverAssistIdRef.current && srvId !== serverAssistIdRef.current) {
+        console.log("⚠️ Event for different request, ignoring");
+        return;
+      }
+
+      console.log("✅ Processing approval for request:", srvId);
+
+      // Update activity item
+      const targetLocalId = pendingLocalIdRef.current;
+      if (targetLocalId) {
+        await updateActivityItem(targetLocalId, { status: "accepted" });
+      }
+
+      // Extract operator details from socket event
+      const operator: OperatorInfo | undefined = evt?.data?.operator
+        ? {
+            id: String(evt.data.operator.id ?? evt.data.operator._id ?? ""),
+            name: evt.data.operator.name,
+            avatar: evt.data.operator.avatar ?? null,
+            phone: evt.data.operator.phone,
+          }
+        : undefined;
+
+      // Show en route card
+      setOperatorStatus({
+        visible: true,
+        assistId: srvId,
+        status: "en_route",
+        eta: evt?.data?.estimatedTimeWindow || "10:15 - 10:25 AM",
+        operator,
+      });
+
+      setRequestStatus("accepted");
+      setIsRequesting(false);
+
+      setOverlay({
+        visible: true,
+        kind: "accepted",
+        caption: "Please check your Inbox to communicate with your service provider",
+      });
+      setTimeout(() => setOverlay((o) => ({ ...o, visible: false })), 1600);
+    };
+
+    socket.on("assist:approved", handleGlobalAssistApproved);
+    console.log("✅ Global assist:approved listener registered");
+
+    return () => {
+      socket.off("assist:approved", handleGlobalAssistApproved);
+      console.log("🛑 Global assist:approved listener removed");
+    };
+  }, []);
+
+  // 🔔 Global listener for operator realtime status updates
+  useEffect(() => {
+    const socket = getSocket();
+    const handleOperatorStatus = (evt: any) => {
+      if (!evt?.success || !evt?.data) return;
+      const assistId = String(evt.data.assistId || evt.data.id || "");
+      if (!assistId) return;
+      if (serverAssistIdRef.current && assistId !== serverAssistIdRef.current) return;
+
+      const raw = String(evt.data.status || "").toLowerCase() as OperatorStatusKind;
+      const nextStatus: OperatorStatusKind =
+        raw === "arrived" || raw === "working" || raw === "completed" ? (raw as OperatorStatusKind) : "en_route";
+
+      setOperatorStatus((prev: OperatorStatusState) => ({
+        visible: nextStatus !== "completed",
+        assistId,
+        status: nextStatus,
+        eta: evt.data.estimatedTime || prev.eta,
+        operator: evt.data.operator || prev.operator,
+      }));
+
+      if (nextStatus === "completed") {
+        setOverlay((o) => ({ ...o, visible: false }));
+        setRequestStatus("idle");
+      }
+    };
+
+    if (socket) {
+      socket.on("operator:statusUpdate", handleOperatorStatus);
+    }
+    return () => {
+      if (socket) {
+        socket.off("operator:statusUpdate", handleOperatorStatus);
+      }
+    };
+  }, []);
+
+  // 🔄 POLLING: Check database every 3 seconds while request is pending
+  useEffect(() => {
+    if (requestStatus !== "requesting" || !serverAssistIdRef.current) return;
+
+    console.log("🔄 Starting polling for request acceptance...");
+    
+    const checkStatus = async () => {
+      try {
+        const token = await AsyncStorage.getItem("token");
+        const response = await fetch(`${API_URL}/api/assist/${serverAssistIdRef.current}`, {
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success && data.data?.status === "accepted") {
+            console.log("✅ Polling detected acceptance!");
+            
+            const operatorData = data.data.assignedTo || data.data.acceptedBy;
+            const operator: OperatorInfo | undefined = operatorData
+              ? {
+                  id: String(operatorData._id || operatorData),
+                  name: operatorData.name || "Operator",
+                  avatar: operatorData.avatar || null,
+                  phone: operatorData.phone || null,
+                }
+              : undefined;
+
+            setOperatorStatus({
+              visible: true,
+              assistId: String(data.data._id),
+              status: "en_route",
+              eta: "10:15 - 10:25 AM",
+              operator,
+            });
+
+            setRequestStatus("accepted");
+            setIsRequesting(false);
+
+            setOverlay({
+              visible: true,
+              kind: "accepted",
+              caption: "Please check your Inbox to communicate with your service provider",
+            });
+            setTimeout(() => setOverlay((o) => ({ ...o, visible: false })), 1600);
+          }
+        }
+      } catch (error) {
+        console.error("❌ Polling error:", error);
+      }
+    };
+
+    const interval = setInterval(checkStatus, 3000); // Poll every 3 seconds
+    checkStatus(); // Check immediately
+
+    return () => {
+      console.log("🛑 Stopping polling");
+      clearInterval(interval);
+    };
+  }, [requestStatus]);
 
   // Don’t render MapView until tile host decision is made
   if (!mapStyle) {
@@ -349,12 +518,11 @@ const Home = () => {
   }
 
   // Dynamic heights so content goes BEHIND the navbar,
-  // while the sheet & overlay sit ABOVE it.
+  // while the sheet/card sits ABOVE it.
   const bottomOverlayHeight = tabBarHeight + 300;
   const stepperInset = tabBarHeight + insets.bottom + 8;
 
   return (
-    // ⬇️ negative margin puts the screen behind the tab bar
     <View style={[styles.fullScreenContainer, { marginBottom: -tabBarHeight }]}>
       <MapView
         style={StyleSheet.absoluteFill}
@@ -371,7 +539,7 @@ const Home = () => {
           followZoomLevel={DEFAULT_ZOOM}
         />
 
-        {/* Custom user marker with the account avatar (MarkerView > PointAnnotation for RN views) */}
+        {/* Custom user marker with the account avatar (MarkerView) */}
         {!!fix && (
           <MarkerView
             key={String((currentUser as any)?.avatar ?? "no-avatar")}
@@ -405,8 +573,23 @@ const Home = () => {
         )}
       </MapView>
 
+      {/* General dark overlay for the entire map */}
+      <View style={styles.mapDarkOverlay}>
+        <LinearGradient
+          colors={["rgba(0,0,0,0.6)", "rgba(0,0,0,0.3)", "rgba(0,0,0,0.1)", "rgba(0,0,0,0.05)"]}
+          locations={[0, 0.3, 0.7, 1]}
+          style={StyleSheet.absoluteFill}
+        />
+      </View>
+
       {/* Dark overlay for bottom sheet area (also extends under navbar) */}
-      <View style={[styles.darkOverlay, { height: bottomOverlayHeight }]} />
+      <View style={[styles.darkOverlay, { height: bottomOverlayHeight }]}>
+        <LinearGradient
+          colors={["rgba(0,0,0,0.1)", "rgba(0,0,0,0.3)", "rgba(0,0,0,0.6)"]}
+          locations={[0, 0.5, 1]}
+          style={StyleSheet.absoluteFill}
+        />
+      </View>
 
       {/* Header */}
       <LocationHeader
@@ -416,19 +599,28 @@ const Home = () => {
         onCopy={handleCopyAddress}
       />
 
-      {/* Bottom request sheet (kept above the navbar) */}
-      <RequestStepper
-        vehicleModel={vehicleModel}
-        setVehicleModel={setVehicleModel}
-        plateNumber={plateNumber}
-        setPlateNumber={setPlateNumber}
-        otherInfo={otherInfo}
-        setOtherInfo={setOtherInfo}
-        onRecenter={recenter}
+      {/* ===== Bottom area: Stepper OR Operator En Route Card ===== */}
+      {/* EnRouteManager - Shows when operator accepts */}
+      <EnRouteManager
+        operatorStatus={operatorStatus}
         bottomInset={stepperInset}
-        onRequest={onRequestAssist}
-        isRequesting={isRequesting}
       />
+      
+      {/* Show stepper only when operator is not en route */}
+      {!operatorStatus.visible && (
+        <RequestStepper
+          vehicleModel={vehicleModel}
+          setVehicleModel={setVehicleModel}
+          plateNumber={plateNumber}
+          setPlateNumber={setPlateNumber}
+          otherInfo={otherInfo}
+          setOtherInfo={setOtherInfo}
+          onRecenter={recenter}
+          bottomInset={stepperInset}
+          onRequest={onRequestAssist}
+          isRequesting={isRequesting}
+        />
+      )}
 
       {/* Status overlays */}
       <RequestStatusOverlay
@@ -456,12 +648,19 @@ const styles = StyleSheet.create({
   },
   container: { flex: 1 },
 
+  mapDarkOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    pointerEvents: "none",
+  },
   darkOverlay: {
     position: "absolute",
     bottom: 0,
     left: 0,
     right: 0,
-    // height set dynamically so it also extends behind the navbar
     pointerEvents: "none",
   },
 
@@ -477,6 +676,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 4,
     shadowOffset: { width: 0, height: 2 },
-    overflow: "hidden", // helps clip the Avatar nicely
+    overflow: "hidden",
   },
 });

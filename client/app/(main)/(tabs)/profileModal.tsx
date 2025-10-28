@@ -14,7 +14,7 @@ import ScreenWrapper from "@/components/ScreenWrapper";
 import Header from "@/components/Header";
 import BackButton from "@/components/BackButton";
 import Avatar from "@/components/Avatar";
-import * as Icons from "phosphor-react-native";
+import * as Icons from "phosphor-react-native";                 
 import Typo from "@/components/Typo";
 import Input from "@/components/Input";
 import { useAuth } from "@/contexts/authContext";

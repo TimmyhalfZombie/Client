@@ -15,9 +15,9 @@ export interface UserProps extends Document {
 
 export interface ConversationProps extends Document {
   _id: Types.ObjectId;
-  type: "direct" | "group";
+  type: "direct"; // Only direct 1-on-1 messaging (customer ↔ operator)
   name?: string;
-  participants: Types.ObjectId[];
+  participants: Types.ObjectId[]; // Always 2 participants [customer, operator]
   lastMessage?: Types.ObjectId;
   createdBy?: Types.ObjectId;
   avatar?: string;
@@ -55,6 +55,44 @@ export interface AssistRequestProps extends Document {
   status: "pending" | "accepted" | "rejected" | "cancelled" | "completed";
   assignedTo?: Types.ObjectId | null;
 
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// Assist Request Types (moved from AssistRequest.ts)
+export type AssistStatus = "pending" | "accepted" | "done" | "completed" | "canceled";
+
+export interface IAssistRequest extends Document {
+  userId: Types.ObjectId;
+  title?: string;
+  placeName?: string;
+  status: AssistStatus;
+  assignedTo?: Types.ObjectId | null;
+  acceptedAt?: Date;
+  customerName?: string;
+  customerEmail?: string;
+  customerPhone?: string;
+  vehicle?: any;
+  location?: {
+    type: string;
+    coordinates: number[];
+    address?: string;
+    accuracy?: number;
+  };
+  // 📍 Real-time location tracking
+  customerCurrentLocation?: {
+    lat: number;
+    lng: number;
+    address?: string;
+    timestamp: Date;
+  };
+  operatorCurrentLocation?: {
+    lat: number;
+    lng: number;
+    address?: string;
+    timestamp: Date;
+  };
+  lastLocationUpdate?: Date;
   createdAt: Date;
   updatedAt: Date;
 }

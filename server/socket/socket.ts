@@ -6,8 +6,7 @@ import { registerUserEvents } from "./userEvents";
 import { registerChatEvents } from "./chatEvents";
 import Conversation from "../modals/Conversation";
 import { registerMessageEvents } from "./messageEvents";
-import { registerAssistEvents } from "./assistEvents";
-import { registerCallEvents } from "./callEvents"; // 👈 NEW
+import { registerAssistEvents, startAutoRefresh } from "./assistEvents";
 
 dotenv.config({ quiet: true });
 
@@ -57,13 +56,16 @@ export function initializeSocket(server: any): SocketIOServer {
     registerUserEvents(io, socket);
     registerMessageEvents(io, socket);
     registerAssistEvents(io, socket);
-    registerCallEvents(io, socket); // 👈 NEW
 
     try {
       const conversations = await Conversation.find({
         participants: userId,
       }).select("_id");
-      conversations.forEach((c) => socket.join(String(c._id)));
+      console.log(`🔌 User ${userId} joining ${conversations.length} conversation rooms`);
+      conversations.forEach((c) => {
+        socket.join(String(c._id));
+        console.log(`🔌 User ${userId} joined room ${c._id}`);
+      });
     } catch (error: any) {
       console.log("Error joining conversation", error);
     }
@@ -72,6 +74,9 @@ export function initializeSocket(server: any): SocketIOServer {
       console.log(`user disconnected: ${userId} (${reason})`);
     });
   });
+
+  // 🔄 Start auto-refresh (0.5s interval) for all clients
+  startAutoRefresh(io);
 
   return io;
 }

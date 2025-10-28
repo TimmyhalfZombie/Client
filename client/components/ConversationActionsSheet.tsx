@@ -8,24 +8,14 @@ type Props = {
   visible: boolean;
   onClose: () => void;
   onDelete: () => void;
-  onVideoCall: () => void;
 };
 
-export default function ConversationActionsSheet({ visible, onClose, onDelete, onVideoCall }: Props) {
+export default function ConversationActionsSheet({ visible, onClose, onDelete }: Props) {
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.backdrop}>
         <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={onClose} />
         <View style={styles.sheet}>
-          <TouchableOpacity style={styles.row} onPress={onVideoCall}>
-            <Icons.Phone size={22} color={colors.white} weight="fill" />
-            <Typo size={16} color={colors.white} style={{ marginLeft: spacingX._10 }}>
-              Video call
-            </Typo>
-          </TouchableOpacity>
-
-          <View style={styles.divider} />
-
           <TouchableOpacity style={styles.row} onPress={onDelete}>
             <Icons.Trash size={22} color="#ff4d4f" weight="fill" />
             <Typo size={16} color="#ff4d4f" style={{ marginLeft: spacingX._10 }}>

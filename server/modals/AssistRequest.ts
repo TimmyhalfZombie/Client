@@ -1,27 +1,8 @@
 // server/modals/AssistRequest.ts
 import { Schema, model, Types, Document } from "mongoose";
 import { getIO } from "../socket/socket";
-
-export type AssistStatus = "pending" | "accepted" | "done" | "canceled";
-
-export interface IAssistRequest extends Document {
-  userId: Types.ObjectId;
-  title?: string;
-  placeName?: string;
-  status: AssistStatus;
-  assignedTo?: Types.ObjectId | null;
-  acceptedAt?: Date;
-  customerName?: string;
-  customerEmail?: string;
-  customerPhone?: string;
-  vehicle?: any;
-  location?: {
-    type: string;
-    coordinates: number[];
-    address?: string;
-    accuracy?: number;
-  };
-}
+import { AssistStatus, IAssistRequest } from "../types";
+import { getCustomerConnection } from "../config/db";
 
 const AssistRequestSchema = new Schema<IAssistRequest>(
   {
@@ -30,7 +11,7 @@ const AssistRequestSchema = new Schema<IAssistRequest>(
     placeName: String,
     status: {
       type: String,
-      enum: ["pending", "accepted", "done", "canceled"],
+      enum: ["pending", "accepted", "done", "completed", "canceled"],
       default: "pending",
       index: true,
     },
@@ -50,6 +31,20 @@ const AssistRequestSchema = new Schema<IAssistRequest>(
       address: String,
       accuracy: Number,
     },
+    // 📍 Real-time location tracking
+    customerCurrentLocation: {
+      lat: Number,
+      lng: Number,
+      address: String,
+      timestamp: Date,
+    },
+    operatorCurrentLocation: {
+      lat: Number,
+      lng: Number,
+      address: String,
+      timestamp: Date,
+    },
+    lastLocationUpdate: Date,
   },
   { timestamps: true }
 );
@@ -69,5 +64,6 @@ AssistRequestSchema.post("deleteOne", { document: true, query: false }, emitDele
 // query-based deletes
 AssistRequestSchema.post("findOneAndDelete", emitDeleted);
 
-const AssistRequest = model<IAssistRequest>("AssistRequest", AssistRequestSchema);
-export default AssistRequest;
+// Use customer connection for AssistRequest model
+const customer = getCustomerConnection();
+export default customer.model<IAssistRequest>("AssistRequest", AssistRequestSchema);

@@ -20,7 +20,6 @@ const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const MIN_W = SCREEN_WIDTH * 0.7;
 const MAX_W = SCREEN_WIDTH * 0.7;
 
-const MISSED_CALL_TOKEN = "__MISSED_VIDEO_CALL__";
 
 const formatTime = (val: string) => {
   if (!val) return "";
@@ -35,27 +34,13 @@ const formatTime = (val: string) => {
 type Props = {
   item: MessageProps;
   isDirect: boolean;
-  conversationId?: string; // for call back
-  displayName?: string; // for call header
 };
 
 const MessageItem = ({
   item,
   isDirect,
-  conversationId,
-  displayName,
 }: Props) => {
   const isMe = item.isMe;
-  const isMissed = item.content === MISSED_CALL_TOKEN;
-  const router = useRouter();
-
-  const onCallback = () => {
-    if (!conversationId) return;
-    router.push({
-      pathname: "/(main)/call",
-      params: { channel: conversationId, name: displayName || "Call" },
-    });
-  };
 
   return (
     <Animated.View
@@ -90,49 +75,19 @@ const MessageItem = ({
             {item.sender?.name || "Unknown"}
           </Typo>
 
-          {isMissed ? (
-            <View style={{ paddingVertical: spacingY._4 }}>
-              <View
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  marginBottom: spacingY._6,
-                }}
-              >
-                <Icons.PhoneX size={18} color="#ffb3b3" weight="fill" />
-                <Typo
-                  size={15}
-                  color="#ffb3b3"
-                  fontFamily="InterLight"
-                  style={{ marginLeft: 6 }}
-                >
-                  Missed video call
-                </Typo>
-              </View>
+          {item.attachment ? (
+            <Image
+              source={{ uri: item.attachment }}
+              style={styles.attachment}
+              resizeMode="cover"
+            />
+          ) : null}
 
-              <TouchableOpacity onPress={onCallback} style={styles.cbBtn}>
-                <Typo size={15} color={colors.black} fontWeight="800">
-                  Call back
-                </Typo>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <>
-              {item.attachment ? (
-                <Image
-                  source={{ uri: item.attachment }}
-                  style={styles.attachment}
-                  resizeMode="cover"
-                />
-              ) : null}
-
-              {item.content ? (
-                <Typo size={15} fontFamily="InterLight" color="#FFFFFF">
-                  {item.content}
-                </Typo>
-              ) : null}
-            </>
-          )}
+          {item.content ? (
+            <Typo size={15} fontFamily="InterLight" color="#FFFFFF">
+              {item.content}
+            </Typo>
+          ) : null}
 
           <Typo
             style={styles.time}
@@ -181,17 +136,10 @@ const styles = StyleSheet.create({
     maxWidth: MAX_W,
     minWidth: MIN_W,
   },
-  myBubble: { backgroundColor: "#77c28394" },
+  myBubble: { backgroundColor: 'rgba(196, 245, 215, 0.49)' }, // was "#C4F5D7",
   theirBubble: { backgroundColor: "#2F3136" },
 
   name: { marginTop: spacingY._1 },
   time: { alignSelf: "flex-end", marginTop: spacingY._1 },
 
-  cbBtn: {
-    alignSelf: "flex-start",
-    backgroundColor: colors.white,
-    paddingHorizontal: spacingX._10,
-    paddingVertical: spacingY._5,
-    borderRadius: radius._10,
-  },
 });

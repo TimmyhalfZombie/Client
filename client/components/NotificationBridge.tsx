@@ -16,10 +16,6 @@ import {
   registerPushToken,
   newMessage,
   markAsRead,
-  onCallIncoming,
-  onCallCancelled,
-  callAccept,
-  callReject,
 } from "@/socket/socketEvents";
 
 import {
@@ -31,21 +27,12 @@ import {
 import Typo from "@/components/Typo";
 import { colors, radius, spacingX, spacingY } from "@/constants/theme";
 
-type IncomingCall = {
-  conversationId: string;
-  channel: string;
-  kind?: "video" | "audio";
-  from?: { id: string; name?: string; avatar?: string };
-  name?: string;
-};
 
 export default function NotificationBridge() {
   const { user } = useAuth();
   const router = useRouter();
   const appState = useRef<AppStateStatus>(AppState.currentState);
 
-  // in-app ring modal
-  const [incoming, setIncoming] = useState<IncomingCall | null>(null);
 
   // Track foreground/background
   useEffect(() => {
@@ -81,7 +68,7 @@ export default function NotificationBridge() {
         const conversationId = data.conversationId as string | undefined;
         const name = (data.name as string | undefined) || "Conversation";
         const avatar = (data.avatar as string | undefined) || "";
-        const type = (data.type as "direct" | "group" | undefined) || "direct";
+        const type = "direct";
         const participants = (
           Array.isArray(data.participants) ? data.participants : []
         ) as Array<{
@@ -172,97 +159,8 @@ export default function NotificationBridge() {
     };
   }, []);
 
-  // 🔔 CALL SIGNALING: listen for incoming invites / cancelled
-  useEffect(() => {
-    const handleIncoming = (evt: any) => {
-      if (!evt?.success || !evt?.data) return;
-      const data = evt.data as IncomingCall;
-      // ignore my own invite (in case of echo)
-      if (data?.from?.id && user?.id && data.from.id === user.id) return;
-      setIncoming(data);
-    };
-    const handleCancelled = () => setIncoming(null);
 
-    onCallIncoming(handleIncoming);
-    onCallCancelled(handleCancelled);
-
-    return () => {
-      onCallIncoming(handleIncoming, true);
-      onCallCancelled(handleCancelled, true);
-    };
-  }, [user?.id]);
-
-  const accept = async () => {
-    if (!incoming) return;
-    await callAccept({
-      conversationId: incoming.conversationId,
-      channel: incoming.channel,
-    });
-    const title = incoming.name || incoming.from?.name || "Call";
-    setIncoming(null);
-    router.push({
-      pathname: "/(main)/call",
-      params: { channel: incoming.channel, name: title },
-    });
-  };
-
-  const reject = async () => {
-    if (!incoming) return;
-    await callReject({
-      conversationId: incoming.conversationId,
-      channel: incoming.channel,
-    });
-    setIncoming(null);
-  };
-
-  return (
-    <Modal
-      visible={!!incoming}
-      transparent
-      animationType="fade"
-      onRequestClose={() => setIncoming(null)}
-    >
-      <View style={styles.backdrop}>
-        <View style={styles.sheet}>
-          <Typo
-            size={18}
-            color={colors.white}
-            fontFamily="InterLight"
-            style={{ textAlign: "center" }}
-          >
-            Incoming {incoming?.kind === "audio" ? "audio" : "video"} call
-          </Typo>
-          <Typo
-            size={22}
-            color={colors.white}
-            fontWeight="800"
-            style={{ textAlign: "center", marginTop: 8 }}
-          >
-            {incoming?.from?.name || incoming?.name || "Unknown"}
-          </Typo>
-
-          <View style={styles.row}>
-            <TouchableOpacity
-              style={[styles.btn, styles.reject]}
-              onPress={reject}
-            >
-              <Typo size={16} color="#fff" fontFamily="InterLight">
-                Reject
-              </Typo>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.btn, styles.accept]}
-              onPress={accept}
-            >
-              <Typo size={16} color="#000" fontFamily="InterLight">
-                Accept
-              </Typo>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
-    </Modal>
-  );
+  return null;
 }
 
 const styles = StyleSheet.create({

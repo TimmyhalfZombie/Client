@@ -1,3 +1,4 @@
+// client/utils/push.ts (or wherever this file lives)
 import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
 import * as FileSystem from "expo-file-system";
@@ -17,7 +18,7 @@ Notifications.setNotificationHandler({
 function isAndroidFcmConfigured(): boolean {
   const expoCfg = (Constants as any)?.expoConfig || {};
   const androidCfg = expoCfg?.android || {};
-  return Boolean(androidCfg.googleServicesFile);
+  return Boolean(androidCfg?.googleServicesFile);
 }
 
 export async function ensureNotificationCategories() {
@@ -40,56 +41,55 @@ export async function ensureNotificationCategories() {
   }
 }
 
-export async function registerForPushNotificationsAsync(): Promise<
-  string | null
-> {
+export async function registerForPushNotificationsAsync(): Promise<string | null> {
   try {
     if (!Device.isDevice) {
       console.log("Push notifications require a physical device.");
       return null;
     }
 
-    const { status: existingStatus } =
-      await Notifications.getPermissionsAsync();
+    const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
+
     if (existingStatus !== "granted") {
       const { status } = await Notifications.requestPermissionsAsync();
       finalStatus = status;
     }
+
     if (finalStatus !== "granted") {
       console.log("Permission not granted for notifications.");
       return null;
     }
 
-    if (Platform.OS === "android" && !isAndroidFcmConfigured()) {
-      console.log(
-        "Android push token skipped: FCM not configured. Foreground local notifications will still work."
-      );
-      await Notifications.setNotificationChannelAsync("default", {
-        name: "Default",
-        importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 250, 250, 250],
-        lockscreenVisibility:
-          Notifications.AndroidNotificationVisibility.PUBLIC,
-        sound: "default",
-      });
-      return null;
+    // Android channel + FCM config check
+    if (Platform.OS === "android") {
+      if (!isAndroidFcmConfigured()) {
+        console.log(
+          "Android push token skipped: FCM not configured. Foreground local notifications will still work."
+        );
+        await Notifications.setNotificationChannelAsync("default", {
+          name: "Default",
+          importance: Notifications.AndroidImportance.MAX,
+          vibrationPattern: [0, 250, 250, 250],
+          lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+          sound: "default",
+        });
+        return null;
+      }
     }
 
     const projectId =
-      (Constants as any)?.expoConfig?.extra?.eas?.projectId ||
+      (Constants as any)?.expoConfig?.extra?.eas?.projectId ??
       (Constants as any)?.easConfig?.projectId;
 
-    const token = (await Notifications.getExpoPushTokenAsync({ projectId }))
-      .data;
+    const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
 
     if (Platform.OS === "android") {
       await Notifications.setNotificationChannelAsync("default", {
         name: "Default",
         importance: Notifications.AndroidImportance.MAX,
         vibrationPattern: [0, 250, 250, 250],
-        lockscreenVisibility:
-          Notifications.AndroidNotificationVisibility.PUBLIC,
+        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
         sound: "default",
       });
     }
@@ -101,10 +101,10 @@ export async function registerForPushNotificationsAsync(): Promise<
   }
 }
 
-function guessUti(
-  urlOrName: string
-): "public.png" | "public.jpeg" | "public.image" {
-  const lower = urlOrName.split("?")[0].toLowerCase();
+function guessUti(urlOrName: string): "public.png" | "public.jpeg" | "public.image" {
+  // With noUncheckedIndexedAccess, array indexing can be undefined. Guard it.
+  const first = urlOrName.split("?")[0] ?? urlOrName;
+  const lower = first.toLowerCase();
   if (lower.endsWith(".png")) return "public.png";
   if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "public.jpeg";
   return "public.image";
@@ -128,11 +128,15 @@ async function prepareIosAvatarAttachment(
     const dir = getWritableDir();
     if (!dir) return undefined;
 
-    const ext = avatarUrl.split("?")[0].split(".").pop() || "jpg";
+    // Guard split indexing & pop() for strict TS
+    const beforeQuery = avatarUrl.split("?")[0] ?? avatarUrl;
+    const ext = (beforeQuery.split(".").pop() ?? "jpg").toLowerCase();
     const fileName = `avatar_${Date.now()}.${ext}`;
     const dest = `${dir}${fileName}`;
 
-    const { uri, status } = await FileSystem.downloadAsync(avatarUrl, dest);
+    const result = await FileSystem.downloadAsync(avatarUrl, dest);
+    const uri = result?.uri;
+    const status = result?.status ?? 0;
     if (status !== 200 || !uri) return undefined;
 
     const uti = guessUti(fileName);
@@ -155,7 +159,7 @@ export async function showLocalMessageNotification(params: {
   const { senderName, preview, conversationId, avatarUrl } = params;
 
   let attachments: Notifications.NotificationContentAttachmentIos[] | undefined;
-  if (Platform.OS === "ios" && avatarUrl) {
+  if (Platform.OS === "ios" && typeof avatarUrl === "string" && avatarUrl.length > 0) {
     const att = await prepareIosAvatarAttachment(avatarUrl);
     attachments = att ? [att] : undefined;
   }
