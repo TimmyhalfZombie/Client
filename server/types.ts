@@ -5,12 +5,16 @@ export interface UserProps extends Document {
   email: string;
   password: string;
   name?: string;
+  username?: string;
   avatar?: string;
   created?: Date;
   phone?: string;
   resetPasswordToken?: string;
   resetPasswordExpires?: Date;
   expoPushToken?: string;
+  initial_lat?: number;
+  initial_lng?: number;
+  initial_address?: string;
 }
 
 export interface ConversationProps extends Document {
@@ -52,15 +56,17 @@ export interface AssistRequestProps extends Document {
     address?: string;
     accuracy?: number;
   };
-  status: "pending" | "accepted" | "rejected" | "cancelled" | "completed";
+  status: "pending" | "accepted" | "completed";
   assignedTo?: Types.ObjectId | null;
+  acceptedAt?: Date;
+  acceptedBy?: Types.ObjectId | null;
 
   createdAt: Date;
   updatedAt: Date;
 }
 
 // Assist Request Types (moved from AssistRequest.ts)
-export type AssistStatus = "pending" | "accepted" | "done" | "completed" | "canceled";
+export type AssistStatus = "pending" | "accepted" | "completed";
 
 export interface IAssistRequest extends Document {
   userId: Types.ObjectId;
@@ -69,6 +75,7 @@ export interface IAssistRequest extends Document {
   status: AssistStatus;
   assignedTo?: Types.ObjectId | null;
   acceptedAt?: Date;
+  acceptedBy?: Types.ObjectId | null;
   customerName?: string;
   customerEmail?: string;
   customerPhone?: string;

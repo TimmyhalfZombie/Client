@@ -1,6 +1,8 @@
 import { Socket, Server as SocketIOServer } from "socket.io";
 import User from "../modals/User";
 import { generateToken } from "../utils/token";
+import { getAppdbConnection } from "../config/db";
+import { Schema } from "mongoose";
 
 export function registerUserEvents(io: SocketIOServer, socket: Socket) {
   socket.on("testSocket", () => {
@@ -84,7 +86,7 @@ export function registerUserEvents(io: SocketIOServer, socket: Socket) {
     }
   });
 
-  // 🔔 Save the Expo push token for this user
+  // 🔔 Save the Expo push token for this user (checks both databases)
   socket.on("registerPushToken", async (data: { token?: string }) => {
     try {
       const userId = socket.data.userId;
@@ -95,8 +97,40 @@ export function registerUserEvents(io: SocketIOServer, socket: Socket) {
         });
         return;
       }
-      await User.findByIdAndUpdate(userId, { expoPushToken: data.token });
-      socket.emit("registerPushToken", { success: true });
+
+      // Try customer database first
+      const updated = await User.findByIdAndUpdate(userId, { expoPushToken: data.token });
+      
+      if (updated) {
+        socket.emit("registerPushToken", { success: true });
+        return;
+      }
+
+      // If not found in customer DB, try appdb
+      try {
+        const appdbConnection = getAppdbConnection();
+        const AppdbUserSchema = new Schema(
+          { username: String, name: String, email: String, avatar: String, phone: String, expoPushToken: String },
+          { collection: "users", strict: false }
+        );
+        const AppdbUser =
+          appdbConnection.models.User || appdbConnection.model("User", AppdbUserSchema);
+
+        const appdbUpdated = await AppdbUser.findByIdAndUpdate(userId, { expoPushToken: data.token });
+        
+        if (appdbUpdated) {
+          socket.emit("registerPushToken", { success: true });
+          return;
+        }
+      } catch (appdbError) {
+        console.error("Error updating push token in appdb:", appdbError);
+      }
+
+      // If user not found in either database
+      socket.emit("registerPushToken", {
+        success: false,
+        msg: "User not found",
+      });
     } catch (e) {
       console.error("registerPushToken error:", e);
       socket.emit("registerPushToken", {

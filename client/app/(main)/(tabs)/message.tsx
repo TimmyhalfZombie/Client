@@ -68,9 +68,11 @@ const Message = () => {
 
     const onUpdated = (evt: any) => {
       if (!evt?.success || !evt?.data) return;
+      const updatedConv = evt.data;
+      console.log(`🔄 Conversation updated: ${updatedConv._id}, unreadCount: ${(updatedConv as any).unreadCount}`);
       setConversations((prev) => {
         const map = new Map(prev.map((c) => [c._id, c]));
-        map.set(evt.data._id, evt.data);
+        map.set(updatedConv._id, updatedConv);
         const arr = Array.from(map.values());
         arr.sort(sortByRecent);
         return arr;

@@ -1,4 +1,3 @@
-// client/components/ConversationItem.tsx
 import { StyleSheet, TouchableOpacity, View } from "react-native";
 import React from "react";
 import { colors, spacingX, spacingY } from "@/constants/theme";
@@ -12,53 +11,65 @@ type Props = ConversationListItemProps & {
   onLongPress?: (item: ConversationListItemProps["item"]) => void;
 };
 
-const ConversationItem = ({
-  item,
-  showDivider,
-  router,
-  onLongPress,
-}: Props) => {
+const ConversationItem = ({ item, showDivider, router, onLongPress }: Props) => {
   const { user: currentUser } = useAuth();
 
   const lastMessage: any = item.lastMessage;
-  const isDirect = item.type === "direct";
-  let avatar = item.avatar;
-  const otherParticipants = isDirect
-    ? item.participants.find((p) => p._id !== currentUser?.id)
-    : null;
-  if (isDirect && otherParticipants) avatar = otherParticipants?.avatar;
+
+  // robust direct detection
+  const isDirect =
+    item?.type === "direct" ||
+    (Array.isArray(item?.participants) && item.participants.length === 2);
+
+  const participants = Array.isArray(item?.participants) ? item.participants : [];
+
+  // find other participant
+  const otherParticipant =
+    isDirect && participants.length
+      ? participants.find((p: any) => String(p?._id) !== String(currentUser?.id))
+      : null;
+
+  // fallback: last sender if not me
+  const lastSender = lastMessage?.senderId as any;
+  const lastSenderIsMe = lastSender && String(lastSender._id) === String(currentUser?.id);
+  const fallbackFromLastSender = !lastSenderIsMe && (lastSender?.name || lastSender?.username);
+
+  // final name (shows "Tim")
+  const conversationName =
+    (isDirect && (otherParticipant?.name || otherParticipant?.username)) ||
+    fallbackFromLastSender ||
+    item.name ||
+    "Conversation";
+
+  // avatar
+  const avatar = isDirect ? otherParticipant?.avatar || item.avatar : item.avatar;
 
   const unreadCount = Number((item as any).unreadCount ?? 0);
   const hasUnread = unreadCount > 0;
 
-  const getLastMessageContent = () => {
-    if (!lastMessage) return "Say hi";
-    return lastMessage?.attachment ? "Image" : lastMessage.content;
-  };
   const getLastMessageDate = () => {
     if (!lastMessage?.createdAt) return null;
-    const messageDate = moment(lastMessage.createdAt);
+    const d = moment(lastMessage.createdAt);
     const now = moment();
-    if (now.diff(messageDate, "minutes") < 1) return "now";
-    if (messageDate.isSame(now, "day")) return messageDate.format("h:mm A");
-    if (messageDate.isSame(now, "year")) return messageDate.format("MMM D");
-    return messageDate.format("MMM D, YYYY");
+    if (now.diff(d, "minutes") < 1) return "now";
+    if (d.isSame(now, "day")) return d.format("h:mm A");
+    if (d.isSame(now, "year")) return d.format("MMM D");
+    return d.format("MMM D, YYYY");
   };
+  const timeLabel = getLastMessageDate();
 
   const openConversation = () => {
     router.push({
       pathname: "/(main)/conversation",
       params: {
         id: item._id,
-        name: item.name,
+        name: conversationName, // keep header consistent
         avatar: item.avatar,
         type: item.type,
         participants: JSON.stringify(item.participants),
       },
     });
   };
-
-  const timeLabel = getLastMessageDate();
 
   return (
     <View>
@@ -72,15 +83,17 @@ const ConversationItem = ({
 
         <View style={{ flex: 1 }}>
           <View style={styles.row}>
-            <Typo
-              size={17}
-              fontFamily="InterLight"
-              fontWeight={hasUnread ? "800" : undefined}
-              color={colors.neutral100}
-              style={styles.nameText}
-            >
-              {isDirect ? otherParticipants?.name : item?.name}
-            </Typo>
+            <View style={styles.nameContainer}>
+              <Typo
+                size={17}
+                fontFamily="InterLight"
+                fontWeight={hasUnread ? "800" : undefined}
+                color={colors.neutral100}
+                style={styles.nameText}
+              >
+                {conversationName}
+              </Typo>
+            </View>
 
             <View style={styles.rightMeta}>
               {timeLabel ? (
@@ -104,18 +117,20 @@ const ConversationItem = ({
               fontFamily="InterLight"
               style={{ marginTop: -10 }}
             >
-              {unreadCount === 1
-                ? "1 new message"
-                : `${unreadCount} new messages`}
+              {unreadCount === 1 ? "1 new message" : `${unreadCount} new messages`}
             </Typo>
-          ) : (
+          ) : lastMessage ? (
             <Typo
               size={15}
               color={colors.neutral400}
               textProps={{ numberOfLines: 1 }}
               fontFamily="InterLight"
             >
-              {getLastMessageContent()}
+              {lastMessage.attachment ? "Image" : lastMessage.content || "Message"}
+            </Typo>
+          ) : (
+            <Typo size={15} color={colors.neutral400} fontFamily="InterLight">
+              Say hi
             </Typo>
           )}
         </View>
@@ -139,6 +154,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-start",
     justifyContent: "space-between",
+  },
+  nameContainer: {
+    flex: 1,
+    flexDirection: "column",
   },
   rightMeta: { flexDirection: "column", alignItems: "flex-end" },
   nameText: { includeFontPadding: false, lineHeight: 20 },

@@ -33,7 +33,7 @@ type ServerMessage = {
   content?: string;
   attachment?: string | null;
   createdAt: string;
-  senderId: { _id: string; name: string; avatar: string | null };
+  senderId: { _id: string; name: string; username?: string; avatar: string | null };
   conversationId?: string;
 };
 
@@ -91,7 +91,8 @@ const Conversation = () => {
     id: m._id,
     sender: {
       id: m.senderId?._id,
-      name: m.senderId?.name,
+      name: m.senderId?.name || "Unknown",
+      username: m.senderId?.username,
       avatar: m.senderId?.avatar ?? null,
     },
     content: m.content ?? "",

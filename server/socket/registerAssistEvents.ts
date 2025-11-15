@@ -3,6 +3,7 @@ import AssistRequest from "../modals/AssistRequest";
 import Conversation from "../modals/Conversation";
 import ConversationMeta from "../modals/ConversationMeta";
 import User from "../modals/User";
+import { populateParticipantsFromBothDbs } from "./chatEvents";
 
 /** Helpers */
 async function ensureDirectConversation(io: SocketIOServer, a: string, b: string) {
@@ -10,7 +11,6 @@ async function ensureDirectConversation(io: SocketIOServer, a: string, b: string
     type: "direct",
     participants: { $all: [a, b], $size: 2 },
   })
-    .populate({ path: "participants", select: "name avatar email" })
     .populate({
       path: "lastMessage",
       select: "content senderId attachment createdAt conversationId",
@@ -41,13 +41,28 @@ async function ensureDirectConversation(io: SocketIOServer, a: string, b: string
     }
 
     convo = await Conversation.findById(created._id)
-      .populate({ path: "participants", select: "name avatar email" })
       .populate({
         path: "lastMessage",
         select: "content senderId attachment createdAt conversationId",
       })
       .lean();
+  }
 
+  // Manually populate participants from both databases
+  if (convo) {
+    const populatedParticipants = await populateParticipantsFromBothDbs(convo.participants || []);
+    convo = {
+      ...convo,
+      participants: populatedParticipants,
+    };
+  }
+
+  // If this is a new conversation, emit it to both participants
+  if (convo && !await Conversation.findOne({
+    type: "direct",
+    participants: { $all: [a, b], $size: 2 },
+    _id: { $ne: convo._id }
+  })) {
     const payload = { ...convo, isNew: true, unreadCount: 0 };
     for (const [sid, s] of io.sockets.sockets) {
       const uid = String((s.data as any)?.userId || "");
@@ -186,12 +201,12 @@ export function registerAssistEvents(io: SocketIOServer, socket: Socket) {
     }
   });
 
-  /** Optional status updates (complete/cancel) — stubs for future operator app */
+  /** Optional status updates (complete only) */
   socket.on("assist:status", async (data: { id: string; status: string }) => {
     try {
       const id = String(data?.id || "");
       const status = String(data?.status || "");
-      if (!["completed", "cancelled", "rejected"].includes(status)) return;
+      if (status !== "completed") return;
 
       const req = await AssistRequest.findByIdAndUpdate(
         id,

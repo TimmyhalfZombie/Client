@@ -1,4 +1,5 @@
 // client/components/MessageItem.tsx
+
 import {
   StyleSheet,
   View,
@@ -19,6 +20,8 @@ import { useRouter } from "expo-router";
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const MIN_W = SCREEN_WIDTH * 0.7;
 const MAX_W = SCREEN_WIDTH * 0.7;
+
+
 
 
 const formatTime = (val: string) => {

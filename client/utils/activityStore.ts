@@ -210,8 +210,8 @@ export async function setActivityStatus(
 }
 
 /**
- * Mark as canceled (local) & try to cancel on server if we have an assist id.
- * Returns true if local state changed.
+ * Cancel/delete activity item - removes from local store and cancels on server if we have an assist id.
+ * Returns true if item was removed.
  */
 export async function markActivityCanceled(where: Where): Promise<boolean> {
   const list = await getActivity();
@@ -223,7 +223,7 @@ export async function markActivityCanceled(where: Where): Promise<boolean> {
 
   const assistId = item.meta?.assistId || item.id; // prefer server id
 
-  // Best-effort server cancel; do not block UI
+  // Best-effort server cancel (deletes request); do not block UI
   try {
     if (assistId) {
       await assistService.cancelAssistRequest(String(assistId));
@@ -232,18 +232,8 @@ export async function markActivityCanceled(where: Where): Promise<boolean> {
     // swallow error; keep local state consistent
   }
 
-  const next: ActivityItem = {
-    ...item,
-    status: "canceled",
-    id: item.id,
-    title: item.title,
-    createdAt: item.createdAt,
-    meta: { ...(item.meta || {}) },
-    location: item.location ? { ...item.location } : undefined,
-    placeName: item.placeName,
-  };
-
-  list[idx] = next;
+  // Remove item from list instead of marking as canceled
+  list.splice(idx, 1);
   await setActivity(list);
   return true;
 }

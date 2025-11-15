@@ -5,6 +5,89 @@ import ConversationMeta from "../modals/ConversationMeta";
 import User from "../modals/User";
 import Message from "../modals/Message";
 import Rating from "../modals/Rating";
+import { populateParticipantsFromBothDbs } from "./chatEvents";
+import { getAppdbConnection } from "../config/db";
+import { Schema } from "mongoose";
+import Expo, { ExpoPushMessage } from "expo-server-sdk";
+
+const expo = new Expo();
+
+type PushPayloadWithoutTo = Omit<ExpoPushMessage, "to">;
+
+/**
+ * Get push tokens for users from both customer and appdb databases
+ * Returns array of push tokens for users who have them registered
+ */
+async function getPushTokensFromBothDbs(userIds: string[]): Promise<string[]> {
+  if (!userIds || userIds.length === 0) return [];
+
+  const tokens: string[] = [];
+
+  try {
+    // Get tokens from customer database
+    const customerUsers = await User.find({
+      _id: { $in: userIds },
+      expoPushToken: { $exists: true, $ne: "" },
+    })
+      .select("expoPushToken _id")
+      .lean();
+
+    const foundIds = new Set(customerUsers.map((u) => String(u._id)));
+    const customerTokens = customerUsers
+      .map((r) => r.expoPushToken)
+      .filter((token): token is string => Boolean(token));
+    tokens.push(...customerTokens);
+
+    // Get tokens from appdb for remaining users
+    const missingIds = userIds.filter((id) => !foundIds.has(id));
+    if (missingIds.length > 0) {
+      try {
+        const appdbConnection = getAppdbConnection();
+        const AppdbUserSchema = new Schema(
+          { username: String, name: String, email: String, avatar: String, phone: String, expoPushToken: String },
+          { collection: "users", strict: false }
+        );
+        const AppdbUser =
+          appdbConnection.models.User || appdbConnection.model("User", AppdbUserSchema);
+
+        const appdbUsers = await AppdbUser.find({
+          _id: { $in: missingIds },
+          expoPushToken: { $exists: true, $ne: "" },
+        })
+          .select("expoPushToken")
+          .lean();
+
+        const appdbTokens = appdbUsers
+          .map((r) => r.expoPushToken)
+          .filter((token): token is string => Boolean(token));
+        tokens.push(...appdbTokens);
+      } catch (error) {
+        console.error("Error fetching push tokens from appdb:", error);
+      }
+    }
+  } catch (error) {
+    console.error("Error fetching push tokens from customer db:", error);
+  }
+
+  return tokens;
+}
+
+async function sendPushToExpo(tokens: string[], message: PushPayloadWithoutTo) {
+  const valid = tokens.filter((t) => Expo.isExpoPushToken(t));
+  if (!valid.length) return;
+
+  const chunks = expo.chunkPushNotifications(
+    valid.map<ExpoPushMessage>((token) => ({ to: token, ...message }))
+  );
+
+  for (const chunk of chunks) {
+    try {
+      await expo.sendPushNotificationsAsync(chunk);
+    } catch (e) {
+      console.error("Expo push chunk error:", e);
+    }
+  }
+}
 
 /** Helpers */
 async function ensureDirectConversation(io: SocketIOServer, a: string, b: string) {
@@ -12,7 +95,6 @@ async function ensureDirectConversation(io: SocketIOServer, a: string, b: string
     type: "direct",
     participants: { $all: [a, b], $size: 2 },
   })
-    .populate({ path: "participants", select: "name avatar email" })
     .populate({
       path: "lastMessage",
       select: "content senderId attachment createdAt conversationId",
@@ -43,13 +125,35 @@ async function ensureDirectConversation(io: SocketIOServer, a: string, b: string
     }
 
     convo = await Conversation.findById(created._id)
-      .populate({ path: "participants", select: "name avatar email" })
       .populate({
         path: "lastMessage",
         select: "content senderId attachment createdAt conversationId",
       })
       .lean();
+  }
 
+  // Manually populate participants from both databases
+  if (convo) {
+    const populatedParticipants = await populateParticipantsFromBothDbs(convo.participants || []);
+    convo = {
+      ...convo,
+      participants: populatedParticipants,
+    };
+  }
+
+  // Check if conversation was just created (to emit newConversation event)
+  let isNewConversation = false;
+  if (convo) {
+    const existingBefore = await Conversation.findOne({
+      type: "direct",
+      participants: { $all: [a, b], $size: 2 },
+      _id: { $ne: convo._id }
+    }).lean();
+    isNewConversation = !existingBefore;
+  }
+
+  // If this is a new conversation, emit it to both participants
+  if (convo && isNewConversation) {
     const payload = { ...convo, isNew: true, unreadCount: 0 };
     for (const [sid, s] of io.sockets.sockets) {
       const uid = String((s.data as any)?.userId || "");
@@ -180,18 +284,31 @@ export function registerAssistEvents(io: SocketIOServer, socket: Socket) {
       );
 
       if (!req) {
+        console.log(`❌ Failed to accept request ${id} - already taken or not found`);
         return socket.emit("assist:accept", {
           success: false,
           msg: "Request already taken by another operator or not found",
         });
       }
 
-      console.log(`✅ Request ${id} accepted by operator ${operatorId}`);
-
-      // Get operator details for customer notification
+      // Get operator details including location and full name/username
       const operator = await User.findById(operatorId)
-        .select("name avatar email")
+        .select("name avatar email phone username initial_lat initial_lng initial_address")
         .lean();
+
+      console.log(`✅ ASSISTANCE REQUEST ACCEPTED`);
+      console.log(`   Request ID: ${id}`);
+      console.log(`   Customer: ${req.customerName} (${String(req.userId)})`);
+      console.log(`   Operator: ${operator?.name || "Unknown"} (${operatorId})`);
+      console.log(`   Vehicle: ${req.vehicle?.model || "N/A"} - ${req.vehicle?.plate || "N/A"}`);
+      console.log(`   Location: ${req.location?.address || "N/A"}`);
+      console.log(`   Status changed: pending → accepted`);
+      
+      // Ensure DM with assist request context FIRST (before notifications)
+      console.log(`🔗 Creating conversation between customer ${req.userId} and operator ${operatorId}`);
+      const conversation = await ensureDirectConversation(io, String(req.userId), operatorId);
+      
+      console.log(`📡 Emitting assist:approved event to customer...`);
 
       // Notify requester (customer) with operator details
       for (const [sid, s] of io.sockets.sockets) {
@@ -207,13 +324,24 @@ export function registerAssistEvents(io: SocketIOServer, socket: Socket) {
               operatorAvatar: operator?.avatar || null,
               operator: {
                 id: operatorId,
-                name: operator?.name || "Operator",
+                name: operator?.name || operator?.username || "Operator",
+                username: operator?.username || operator?.name || null,
+                fullName: operator?.name || operator?.username || null,
                 avatar: operator?.avatar || null,
-                phone: operator?.phone || null
+                phone: operator?.phone || null,
+                email: operator?.email || null,
+                // Include operator location if available
+                location: (operator?.initial_lat && operator?.initial_lng) ? {
+                  lat: Number(operator.initial_lat),
+                  lng: Number(operator.initial_lng),
+                  address: operator.initial_address || null,
+                } : null,
               },
+              conversationId: conversation?._id?.toString() || null, // Include conversationId
               estimatedTimeWindow: "10:15 - 10:25 AM" // Default ETA
             },
           });
+          console.log(`✅ assist:approved event sent to customer ${req.userId}`);
         }
       }
 
@@ -242,10 +370,6 @@ export function registerAssistEvents(io: SocketIOServer, socket: Socket) {
           });
         }
       }
-
-      // Ensure DM with assist request context
-      console.log(`🔗 Creating conversation between customer ${req.userId} and operator ${operatorId}`);
-      const conversation = await ensureDirectConversation(io, String(req.userId), operatorId);
       
       // Update conversation name to include assist request details
       if (conversation) {
@@ -269,9 +393,17 @@ export function registerAssistEvents(io: SocketIOServer, socket: Socket) {
         }
         
         // Notify both users about the new conversation with the same conversation ID
-        const populatedConversation = await Conversation.findById(conversation._id)
-          .populate({ path: "participants", select: "name avatar email" })
+        const conversationDoc = await Conversation.findById(conversation._id)
           .lean();
+        
+        // Manually populate participants from both databases
+        const populatedParticipants = conversationDoc
+          ? await populateParticipantsFromBothDbs(conversationDoc.participants || [])
+          : [];
+        const populatedConversation = conversationDoc ? {
+          ...conversationDoc,
+          participants: populatedParticipants,
+        } : null;
           
         if (populatedConversation) {
           const conversationData = { 
@@ -309,6 +441,30 @@ export function registerAssistEvents(io: SocketIOServer, socket: Socket) {
         console.log(`❌ Failed to create conversation between ${req.userId} and ${operatorId}`);
       }
 
+      // 🔔 Send push notification to customer when request is accepted
+      try {
+        const tokens = await getPushTokensFromBothDbs([String(req.userId)]);
+        if (tokens.length > 0) {
+          const operatorName = operator?.name || operator?.username || "An operator";
+          await sendPushToExpo(tokens, {
+            title: "Request Accepted! 🎉",
+            body: `${operatorName} has accepted your assistance request`,
+            sound: "default",
+            categoryId: "ASSIST_ACCEPTED",
+            data: {
+              type: "assist_accepted",
+              assistRequestId: id,
+              operatorName,
+              operatorId: operatorId,
+              conversationId: conversation?._id?.toString() || null,
+            },
+          });
+          console.log(`📱 Push notification sent to customer ${req.userId} for accepted request`);
+        }
+      } catch (pushError) {
+        console.error("Error sending push notification for accepted request:", pushError);
+      }
+
       socket.emit("assist:accept", { success: true, data: { id } });
     } catch (e) {
       console.error("assist:accept error:", e);
@@ -321,23 +477,105 @@ export function registerAssistEvents(io: SocketIOServer, socket: Socket) {
     try {
       const id = String(data?.id || "");
       const status = String(data?.status || "");
-      if (!["completed", "cancelled", "rejected", "done"].includes(status)) return;
+      if (!["completed"].includes(status)) return;
+
+      const operatorId = String((socket.data as any)?.userId || "");
+      
+      // Update status and set completedAt/completedBy if operator is completing
+      const updateData: any = { status: "completed" };
+      if (operatorId) {
+        updateData.completedAt = new Date();
+        updateData.completedBy = operatorId;
+      }
 
       const req = await AssistRequest.findByIdAndUpdate(
         id,
-        { status },
+        updateData,
         { new: true }
       ).lean();
-      if (!req) return;
+      
+      if (!req) {
+        console.log(`❌ Failed to update request ${id} - not found`);
+        return socket.emit("assist:status", { success: false, msg: "Request not found" });
+      }
 
+      console.log(`✅ ASSISTANCE REQUEST COMPLETED`);
+      console.log(`   Request ID: ${id}`);
+      console.log(`   Customer: ${req.customerName} (${String(req.userId)})`);
+      console.log(`   Status changed to: completed`);
+
+      // Get operator details for notification
+      let operatorName = "Operator";
+      if (operatorId) {
+        try {
+          const operator = await User.findById(operatorId)
+            .select("name username")
+            .lean();
+          if (operator) {
+            operatorName = operator.name || operator.username || "Operator";
+          } else {
+            // Try appdb
+            const appdbConnection = getAppdbConnection();
+            const AppdbUserSchema = new Schema(
+              { username: String, name: String },
+              { collection: "users", strict: false }
+            );
+            const AppdbUser =
+              appdbConnection.models.User || appdbConnection.model("User", AppdbUserSchema);
+            const appdbOperator = await AppdbUser.findById(operatorId)
+              .select("username name")
+              .lean() as any;
+            if (appdbOperator) {
+              operatorName = appdbOperator.username || appdbOperator.name || "Operator";
+            }
+          }
+        } catch (err) {
+          console.error("Error fetching operator name:", err);
+        }
+      }
+
+      // 🔔 Send push notification to customer when request is completed
+      try {
+        const tokens = await getPushTokensFromBothDbs([String(req.userId)]);
+        if (tokens.length > 0) {
+          await sendPushToExpo(tokens, {
+            title: "Request Completed! ✅",
+            body: `Your assistance request has been completed by ${operatorName}`,
+            sound: "default",
+            categoryId: "ASSIST_COMPLETED",
+            data: {
+              type: "assist_completed",
+              assistRequestId: id,
+              operatorName,
+              operatorId: operatorId || null,
+            },
+          });
+          console.log(`📱 Push notification sent to customer ${req.userId} for completed request`);
+        }
+      } catch (pushError) {
+        console.error("Error sending push notification for completed request:", pushError);
+      }
+
+      // Emit to customer via socket
       for (const [sid, s] of io.sockets.sockets) {
         const uid = String((s.data as any)?.userId || "");
         if (uid === String(req.userId)) {
-          io.to(sid).emit("assist:status", { success: true, data: { id, status } });
+          io.to(sid).emit("assist:status", { 
+            success: true, 
+            data: { 
+              id, 
+              status,
+              completedAt: (req as any).completedAt || new Date(),
+              completedBy: (req as any).completedBy || operatorId || null,
+            } 
+          });
         }
       }
+
+      socket.emit("assist:status", { success: true, data: { id, status } });
     } catch (e) {
       console.error("assist:status error:", e);
+      socket.emit("assist:status", { success: false, msg: "Failed to update status" });
     }
   });
 
@@ -554,7 +792,7 @@ export function registerAssistEvents(io: SocketIOServer, socket: Socket) {
         });
       }
 
-      if (request.status !== "done" && request.status !== "completed") {
+      if (request.status !== "completed") {
         return socket.emit("rating:submit", {
           success: false,
           msg: "Request must be completed before rating"

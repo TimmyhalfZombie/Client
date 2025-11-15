@@ -7,7 +7,7 @@ import { ActivityItem } from "@/types";
 /**
  * Mount once (RootLayout). Keeps Activity items in sync with server pushes:
  *  - assist:approved  -> status = accepted
- *  - assist:status    -> completed/cancelled/rejected mapping
+ *  - assist:status    -> completed status mapping
  */
 export default function AssistSocketBridge() {
   useEffect(() => {
@@ -50,10 +50,7 @@ export default function AssistSocketBridge() {
       const raw = String(evt.data.status || "").toLowerCase();
 
       const map: Record<string, ActivityItem["status"]> = {
-        completed: "done",
-        cancelled: "canceled",
-        canceled: "canceled",
-        rejected: "canceled",
+        completed: "completed",
         pending: "pending",
         accepted: "accepted",
       };

@@ -115,6 +115,7 @@ export type ConversationProps = {
   participants: {
     _id: string;
     name: string;
+    username?: string;
     avatar: string;
     email: string;
   }[]; // Always 2 participants [customer, operator]
@@ -137,6 +138,7 @@ export type MessageProps = {
   sender: {
     id: string;
     name: string;
+    username?: string;
     avatar: string | null;
   };
   content: string;
@@ -151,7 +153,7 @@ export interface AssistRequest {
   userId: string;
   title?: string;
   placeName?: string;
-  status: "pending" | "accepted" | "done" | "canceled";
+  status: "pending" | "accepted" | "completed";
   assignedTo?: string;
   customerName?: string;
   customerEmail?: string;
@@ -184,7 +186,7 @@ export type ActivityItem = {
   title: string;
   placeName?: string;
   createdAt: string;
-  status: "pending" | "accepted" | "done" | "canceled";
+  status: "pending" | "accepted" | "completed";
   meta?: { assistId?: string | null; operator?: any; [k: string]: any };
   location?: {
     street?: string;
@@ -232,8 +234,16 @@ export type OperatorStatusKind = "en_route" | "arrived" | "working" | "completed
 export type OperatorInfo = {
   id?: string;
   name?: string;
+  username?: string | null;
+  fullName?: string | null;
   avatar?: string | null;
   phone?: string;
+  email?: string | null;
+  location?: {
+    lat: number;
+    lng: number;
+    address?: string | null;
+  } | null;
 };
 
 export type OperatorStatusState = {

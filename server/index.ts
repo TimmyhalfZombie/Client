@@ -8,6 +8,7 @@ import authRoutes from "./routes/auth.routes";
 import { initializeSocket } from "./socket/socket";
 import assistRoutes from "./routes/assist.routes";
 import routingRoutes from "./routes/routing.routes";
+import operatorRoutes from "./routes/operator.routes";
 import { stopAutoRefresh } from "./socket/assistEvents"; 
 
 // Load environment variables
@@ -29,7 +30,8 @@ app.use(
 
 app.use("/auth", authRoutes);
 app.use("/api/assist", assistRoutes);
-app.use("/api/routing", routingRoutes); 
+app.use("/api/routing", routingRoutes);
+app.use("/api", operatorRoutes); 
 app.get("/", (_req, res) => {
   res.send("Server is running");
 });

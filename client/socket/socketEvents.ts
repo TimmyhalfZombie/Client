@@ -1,3 +1,4 @@
+// client//socket/socketEvents.ts
 import { getSocket } from "./socket";
 import { ResponseProps } from "@/types";
 

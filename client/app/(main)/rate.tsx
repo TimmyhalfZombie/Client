@@ -5,7 +5,8 @@ import { useLocalSearchParams, router } from "expo-router";
 import ScreenWrapper from "@/components/ScreenWrapper";
 import Typo from "@/components/Typo";
 import { colors, spacingX, spacingY, radius } from "@/constants/theme";
-import { getActivity, ActivityItem } from "@/utils/activityStore";
+import { getActivity } from "@/utils/activityStore";
+import { ActivityItem } from "@/types";
 import assistService from "@/services/assistService";
 import * as Icons from "phosphor-react-native";
 import BackButton from "@/components/BackButton";
@@ -13,7 +14,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useCurrentAddress } from "@/hooks/useCurrentAddress";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API_URL } from "@/constants";
-import { GEOAPIFY_KEY } from "@/constants/map";
+
 import { useOperatorForAssist } from "@/hooks/useOperatorForAssist";
 
 const Card = ({ children, style }: { children: React.ReactNode; style?: any }) => (
@@ -56,23 +57,6 @@ async function authGet(path: string) {
   return json?.data ?? json;
 }
 
-async function reverseGeocode(lat?: number, lng?: number) {
-  if (!lat || !lng || !GEOAPIFY_KEY) return null;
-  try {
-    const r = await fetch(
-      `https://api.geoapify.com/v1/geocode/reverse?lat=${lat}&lon=${lng}&apiKey=${GEOAPIFY_KEY}`
-    );
-    const j = await r.json();
-    const p = j?.features?.[0]?.properties;
-    const name = p?.name || p?.street;
-    const city = p?.city || p?.town || p?.village || p?.county;
-    const region = p?.state;
-    const parts = [name, city, region].filter(Boolean);
-    return parts.length ? parts.join(", ") : `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-  } catch {
-    return null;
-  }
-}
 
 function splitAddress(a?: string | null) {
   const txt = (a || "").trim();
@@ -116,17 +100,23 @@ export default function RateActivity() {
   const [opName, setOpName] = useState<string | null>(null);
   const [opAddr, setOpAddr] = useState<string | null>(null);
 
+  // Helper to filter out test data like CJBLACK
+  const normalizeOperatorName = (name: string | null | undefined): string | null => {
+    if (!name) return null;
+    const trimmed = name.trim();
+    if (trimmed === "" || 
+        trimmed.toUpperCase() === "CJBLACK" || 
+        trimmed.toLowerCase() === "cjblack") {
+      return "Operator";
+    }
+    return trimmed;
+  };
+
   // 1) Adopt socket/hook data immediately (fastest path)
   useEffect(() => {
-    if (nameFromHook) setOpName(nameFromHook);
+    if (nameFromHook) setOpName(normalizeOperatorName(nameFromHook));
     if (locFromHook?.address) setOpAddr(locFromHook.address);
-    else if (
-      typeof locFromHook?.lat === "number" &&
-      typeof locFromHook?.lng === "number"
-    ) {
-      reverseGeocode(locFromHook.lat, locFromHook.lng).then((a) => a && setOpAddr(a));
-    }
-  }, [nameFromHook, locFromHook?.address, locFromHook?.lat, locFromHook?.lng]);
+  }, [nameFromHook, locFromHook?.address]);
 
   // 2) REST fallbacks (covers cases when socket didn’t provide name/address)
   useEffect(() => {
@@ -143,7 +133,7 @@ export default function RateActivity() {
         // try to use populated name if available
         const populatedName =
           typeof rawOp === "object" && (rawOp?.name || rawOp?.username || rawOp?.fullName);
-        if (populatedName && !opName) setOpName(String(populatedName));
+        if (populatedName && !opName) setOpName(normalizeOperatorName(String(populatedName)));
 
         if (!operatorId) return;
 
@@ -161,7 +151,7 @@ export default function RateActivity() {
               const nm =
                 prof?.name || prof?.username || prof?.fullName || prof?.displayName;
               if (nm) {
-                setOpName(String(nm));
+                setOpName(normalizeOperatorName(String(nm)));
                 break;
               }
             } catch {}
@@ -191,14 +181,117 @@ export default function RateActivity() {
 
           if (addr) {
             setOpAddr(addr);
-          } else if (Number.isFinite(lat!) && Number.isFinite(lng!)) {
-            const pretty = await reverseGeocode(lat!, lng!);
-            if (pretty) setOpAddr(pretty);
           }
         }
       } catch {}
     })();
   }, [assistId, opName, opAddr]);
+
+  // Fallback: try to get operator name from item.meta if not loaded yet
+  useEffect(() => {
+    if (!opName && item?.meta?.operator?.name) {
+      setOpName(normalizeOperatorName((item.meta as any).operator.name));
+    }
+  }, [item, opName]);
+
+  // Get operator username and initial_address from appdb (using acceptedBy)
+  const [operatorUsername, setOperatorUsernameFromAppdb] = useState<string | null>(null);
+  const [operatorInitialAddress, setOperatorInitialAddressFromAppdb] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!item || !assistId) {
+      setOperatorUsernameFromAppdb(null);
+      setOperatorInitialAddressFromAppdb(null);
+      return;
+    }
+
+    (async () => {
+      try {
+        // Fetch assist request to get acceptedBy
+        const assistRequest = await assistService.fetchAssistRequestById(assistId);
+        if (!assistRequest) return;
+
+        // Get operator ID from acceptedBy or assignedTo
+        const acceptedBy = (assistRequest as any)?.acceptedBy;
+        const assignedTo = (assistRequest as any)?.assignedTo;
+        const operatorId = acceptedBy 
+          ? (typeof acceptedBy === "string" ? acceptedBy : acceptedBy._id || acceptedBy.id)
+          : (assignedTo ? (typeof assignedTo === "string" ? assignedTo : assignedTo._id || assignedTo.id) : null);
+        
+        if (!operatorId) {
+          // Fallback: try to get from meta
+          const op = (item?.meta as any)?.operator;
+          if (op?.username) {
+            const username = op.username.trim();
+            if (username && username.toUpperCase() !== "CJBLACK" && username.toLowerCase() !== "cjblack") {
+              setOperatorUsernameFromAppdb(username);
+            }
+          }
+          const loc = (item?.meta as any)?.operatorLocation;
+          if (loc?.address) {
+            setOperatorInitialAddressFromAppdb(loc.address.trim());
+          }
+          return;
+        }
+
+        // Fetch operator from appdb
+        const token = await AsyncStorage.getItem("token");
+        const response = await fetch(`${API_URL}/api/app/users/${operatorId}`, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        });
+
+        if (response.ok) {
+          const operatorData = await response.json();
+          const data = operatorData.data || operatorData;
+          
+          if (data?.username) {
+            const username = data.username.trim();
+            if (username && username.toUpperCase() !== "CJBLACK" && username.toLowerCase() !== "cjblack") {
+              setOperatorUsernameFromAppdb(username);
+            }
+          }
+          
+          if (data?.initial_address) {
+            const address = data.initial_address.trim();
+            if (address) {
+              setOperatorInitialAddressFromAppdb(address);
+            }
+          }
+        } else {
+          // Fallback: try to get from meta if API fails
+          const op = (item?.meta as any)?.operator;
+          if (op?.username) {
+            const username = op.username.trim();
+            if (username && username.toUpperCase() !== "CJBLACK" && username.toLowerCase() !== "cjblack") {
+              setOperatorUsernameFromAppdb(username);
+            }
+          }
+          const loc = (item?.meta as any)?.operatorLocation;
+          if (loc?.address) {
+            setOperatorInitialAddressFromAppdb(loc.address.trim());
+          }
+        }
+      } catch (error) {
+        console.error("Error fetching operator from appdb:", error);
+        // Fallback: try to get from meta
+        const op = (item?.meta as any)?.operator;
+        if (op?.username) {
+          const username = op.username.trim();
+          if (username && username.toUpperCase() !== "CJBLACK" && username.toLowerCase() !== "cjblack") {
+            setOperatorUsernameFromAppdb(username);
+          }
+        }
+        const loc = (item?.meta as any)?.operatorLocation;
+        if (loc?.address) {
+          setOperatorInitialAddressFromAppdb(loc.address.trim());
+        }
+      }
+    })();
+  }, [item, assistId]);
 
   const handleSaveRating = async () => {
     if (!item) return;
@@ -282,11 +375,14 @@ export default function RateActivity() {
             <View style={{ alignItems: "center" }}>
               <View style={[styles.dotBig, { backgroundColor: "#3777FF" }]} />
               <View style={styles.rail} />
-              <View style={[styles.dotBig, { backgroundColor: "#FF5454" }]} />
+              {/* Red dot for operator at the bottom */}
+              {operatorUsername && operatorInitialAddress ? (
+                <View style={[styles.dotBig, { backgroundColor: "#FF5454" }]} />
+              ) : null}
             </View>
 
             {/* Stops */}
-            <View style={{ flex: 1, gap: 20 }}>
+            <View style={{ flex: 1, justifyContent: 'space-between' }}>
               {/* Customer current location */}
               <View>
                 <Typo size={16} color={colors.white} fontWeight="900">
@@ -295,17 +391,17 @@ export default function RateActivity() {
                 {!!custSub && <Typo size={12} color={colors.neutral400}>{custSub}</Typo>}
               </View>
 
-              {/* Operator current location (real) */}
-              {(opName || opAddr) ? (
-                <View style={{ marginTop: 80 }}>
+              {/* Operator username and initial_address from appdb (red dot) - at the bottom */}
+              {operatorUsername && operatorInitialAddress && (
+                <View style={{ marginTop: spacingY._40, paddingTop: spacingY._20 }}>
                   <Typo size={16} color={colors.white} fontWeight="900">
-                    {opName || "Operator"}
+                    {operatorUsername}
                   </Typo>
                   <Typo size={12} color={colors.neutral400}>
-                    {[opTitle, opSub].filter(Boolean).join(", ")}
+                    {operatorInitialAddress}
                   </Typo>
                 </View>
-              ) : null}
+              )}
             </View>
           </View>
         </Card>

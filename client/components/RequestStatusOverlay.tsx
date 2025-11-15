@@ -15,7 +15,7 @@ import * as activityStore from "@/utils/activityStore";
 
 type Props = {
   visible: boolean;
-  kind: "requesting" | "accepted";
+  kind: "requesting" | "accepted" | "completed";
   caption?: string;
   onClose?: () => void;
   onCancel?: () => void; // parent may call load()
@@ -45,6 +45,7 @@ export default function RequestStatusOverlay({
   assistId,
 }: Props) {
   const isAccepted = kind === "accepted";
+  const isCompleted = kind === "completed";
   const [internalVisible, setInternalVisible] = useState(false);
 
   const opacity = useRef(new Animated.Value(0)).current;
@@ -122,7 +123,7 @@ export default function RequestStatusOverlay({
   }, [visible]);
 
   useEffect(() => {
-    if (!internalVisible || !visible || isAccepted) return;
+    if (!internalVisible || !visible || isAccepted || isCompleted) return;
     requestProgress.stopAnimation();
     requestProgress.setValue(0);
     const progressAnim = Animated.timing(requestProgress, {
@@ -145,7 +146,7 @@ export default function RequestStatusOverlay({
   }, [internalVisible, visible, isAccepted, logDelayMs]);
 
   useEffect(() => {
-    if (!internalVisible || !visible || !isAccepted) return;
+    if (!internalVisible || !visible || !isAccepted || isCompleted) return;
     setAcceptedCountdown(Math.ceil(autoCloseMsAccepted / 1000));
     if (showAcceptedCountdown && autoCloseMsAccepted > 0) {
       acceptedTickRef.current = setInterval(
@@ -247,6 +248,34 @@ export default function RequestStatusOverlay({
                   Assistance accepted
                 </Typo>
               </>
+            ) : isCompleted ? (
+              <>
+                <View style={styles.badgeCompleted}>
+                  <Icons.CheckCircle size={36} color={colors.black} weight="bold" />
+                </View>
+                <Typo
+                  size={18}
+                  color={colors.white}
+                  fontWeight="800"
+                  style={{ marginTop: spacingY._8 }}
+                >
+                  Request completed
+                </Typo>
+                {!!caption && (
+                  <Typo
+                    size={14}
+                    color={colors.white}
+                    fontFamily="InterLight"
+                    style={{
+                      marginTop: spacingY._4,
+                      opacity: 0.9,
+                      textAlign: "center",
+                    }}
+                  >
+                    {caption}
+                  </Typo>
+                )}
+              </>
             ) : (
               <>
                 <Typo size={20} color={colors.white} fontWeight="800">
@@ -303,6 +332,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   badgeAccepted: {
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    backgroundColor: colors.green,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  badgeCompleted: {
     width: 84,
     height: 84,
     borderRadius: 42,

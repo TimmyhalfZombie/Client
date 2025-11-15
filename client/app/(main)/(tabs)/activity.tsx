@@ -71,7 +71,7 @@ const LeftBadge = () => (
 
 const RightStatus = ({ status }: { status: ActivityItem["status"] }) => {
   if (status === "pending") return <View style={[styles.rightDot, styles.rightDotGreen]} />;
-  if (status === "canceled") return <View style={[styles.rightDot, styles.rightDotRed]} />;
+  if (status === "accepted") return <View style={[styles.rightDot, styles.rightDotYellow]} />;
   return (
     <View style={styles.rightCheck}>
       <Icons.Check size={12} color={BG_SCREEN} weight="bold" />
@@ -345,7 +345,6 @@ export default function ActivityList() {
             renderItem={({ item, index }) => {
               if (!item) return null;
               const id = getItemId(item, index);
-              const isCanceled = item.status === "canceled";
               return (
                 <View style={styles.row}>
                   <LeftBadge />
@@ -364,7 +363,19 @@ export default function ActivityList() {
                       {new Date(item.createdAt).toLocaleString()}
                     </Typo>
 
-                    {!isCanceled && (
+                    {(item.status === "pending" || item.status === "accepted") && (
+                      <Pressable
+                        onPress={() => router.push({ pathname: "/(main)/track", params: { id } })}
+                        style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 }}
+                        accessibilityRole="button"
+                      >
+                        <Typo size={12} color={COLOR.neutral300} fontFamily="InterLight" fontWeight="400">
+                          Track
+                        </Typo>
+                        <Icons.ArrowRight size={14} color={COLOR.neutral300} />
+                      </Pressable>
+                    )}
+                    {item.status === "completed" && (
                       <Pressable
                         onPress={() => router.push({ pathname: "/(main)/rate", params: { id } })}
                         style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 }}
@@ -375,18 +386,6 @@ export default function ActivityList() {
                         </Typo>
                         <Icons.ArrowRight size={14} color={COLOR.neutral300} />
                       </Pressable>
-                    )}
-
-                    {isCanceled && (
-                      <Typo
-                        size={12}
-                        color={CANCEL_COLOR}
-                        fontFamily="InterLight"
-                        style={{ marginTop: 4 }}
-                        fontWeight="600"
-                      >
-                        Request canceled
-                      </Typo>
                     )}
                   </View>
                   <RightStatus status={item.status} />
@@ -436,7 +435,7 @@ const styles = StyleSheet.create({
   },
   rightDot: { width: 10, height: 10, borderRadius: 5 },
   rightDotGreen: { backgroundColor: COLOR.green },
-  rightDotRed: { backgroundColor: CANCEL_COLOR },
+  rightDotYellow: { backgroundColor: "#FFB800" }, // Yellow for accepted status
   rightCheck: {
     width: 22,
     height: 22,

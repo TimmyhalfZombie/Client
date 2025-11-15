@@ -11,6 +11,7 @@ import {
 import { useAuth } from "@/contexts/authContext";
 import * as Clipboard from "expo-clipboard";
 import Logger from "@maplibre/maplibre-react-native";
+import { router } from "expo-router";
 import {
   MapView,
   Camera,
@@ -130,7 +131,7 @@ const Home = () => {
   // Request status overlay
   const [overlay, setOverlay] = useState<{
     visible: boolean;
-    kind: "requesting" | "accepted";
+    kind: "requesting" | "accepted" | "completed";
     caption?: string;
   }>({
     visible: false,
@@ -320,11 +321,8 @@ const Home = () => {
       const srvId = String(evt?.data?.id || "");
       if (!evt?.success || !srvId) return;
       const raw = String(evt?.data?.status || "").toLowerCase();
-      const map: Record<string, "done" | "canceled" | "pending" | "accepted"> = {
-        completed: "done",
-        cancelled: "canceled",
-        canceled: "canceled",
-        rejected: "canceled",
+      const map: Record<string, "pending" | "accepted" | "completed"> = {
+        completed: "completed",
         pending: "pending",
         accepted: "accepted",
       };
@@ -332,10 +330,23 @@ const Home = () => {
       const targetLocalId = pendingLocalIdRef.current;
       if (targetLocalId) await updateActivityItem(targetLocalId, { status: localStatus });
 
-      // hide card upon completion/cancel
-      if (raw === "completed" || raw === "cancelled" || raw === "canceled" || raw === "rejected") {
+      // handle completion - show banner and navigate
+      if (raw === "completed") {
         setOperatorStatus((s: OperatorStatusState) => ({ ...s, visible: false }));
         setRequestStatus("idle");
+        
+        // Show completed banner
+        setOverlay({
+          visible: true,
+          kind: "completed",
+          caption: "Your assistance request has been completed!",
+        });
+        
+        // Auto-navigate to activity after 4 seconds
+        setTimeout(() => {
+          setOverlay((o) => ({ ...o, visible: false }));
+          router.push("/(main)/(tabs)/activity");
+        }, 4000);
       }
     };
 
@@ -362,21 +373,42 @@ const Home = () => {
 
       console.log("✅ Processing approval for request:", srvId);
 
-      // Update activity item
+      // Update activity item (will be updated with operator data below)
       const targetLocalId = pendingLocalIdRef.current;
-      if (targetLocalId) {
-        await updateActivityItem(targetLocalId, { status: "accepted" });
-      }
 
-      // Extract operator details from socket event
+      // Extract operator details from socket event (includes location, username, fullName)
       const operator: OperatorInfo | undefined = evt?.data?.operator
         ? {
             id: String(evt.data.operator.id ?? evt.data.operator._id ?? ""),
-            name: evt.data.operator.name,
+            name: evt.data.operator.name || evt.data.operator.username || "Operator",
+            username: evt.data.operator.username || evt.data.operator.name || null,
+            fullName: evt.data.operator.fullName || evt.data.operator.name || evt.data.operator.username || null,
             avatar: evt.data.operator.avatar ?? null,
-            phone: evt.data.operator.phone,
+            phone: evt.data.operator.phone || null,
+            email: evt.data.operator.email || null,
+            location: evt.data.operator.location || null,
           }
         : undefined;
+      
+      // Update activity item with full operator data including location
+      if (targetLocalId && operator) {
+        await updateActivityItem(targetLocalId, {
+          status: "accepted",
+          meta: {
+            assistId: srvId,
+            operator: {
+              id: operator.id,
+              name: operator.name,
+              username: operator.username,
+              fullName: operator.fullName,
+              avatar: operator.avatar,
+              phone: operator.phone,
+              email: operator.email,
+            },
+            operatorLocation: operator.location,
+          },
+        });
+      }
 
       // Show en route card
       setOperatorStatus({
@@ -404,6 +436,56 @@ const Home = () => {
     return () => {
       socket.off("assist:approved", handleGlobalAssistApproved);
       console.log("🛑 Global assist:approved listener removed");
+    };
+  }, []);
+
+  // 🔔 Global listener for assist status updates (including completed)
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return;
+
+    const handleGlobalAssistStatus = async (evt: any) => {
+      if (!evt?.success || !evt?.data) return;
+      const srvId = String(evt?.data?.id || "");
+      if (!srvId) return;
+      
+      const raw = String(evt?.data?.status || "").toLowerCase();
+      
+      // Handle completed status
+      if (raw === "completed") {
+        console.log("✅ GLOBAL: Received completed status for request:", srvId);
+        
+        // Update activity item if we have it
+        const targetLocalId = pendingLocalIdRef.current;
+        if (targetLocalId) {
+          await updateActivityItem(targetLocalId, { status: "completed" });
+        }
+        
+        // Hide operator status card
+        setOperatorStatus((s: OperatorStatusState) => ({ ...s, visible: false }));
+        setRequestStatus("idle");
+        
+        // Show completed banner
+        setOverlay({
+          visible: true,
+          kind: "completed",
+          caption: "Your assistance request has been completed!",
+        });
+        
+        // Auto-navigate to activity after 4 seconds
+        setTimeout(() => {
+          setOverlay((o) => ({ ...o, visible: false }));
+          router.push("/(main)/(tabs)/activity");
+        }, 4000);
+      }
+    };
+
+    socket.on("assist:status", handleGlobalAssistStatus);
+    console.log("✅ Global assist:status listener registered");
+
+    return () => {
+      socket.off("assist:status", handleGlobalAssistStatus);
+      console.log("🛑 Global assist:status listener removed");
     };
   }, []);
 

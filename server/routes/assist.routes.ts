@@ -91,6 +91,7 @@ router.get("/:id", auth, async (req, res) => {
       return res.status(404).json({ success: false, msg: "Not found" });
     }
     
+    // acceptedBy should be included by default, but ensure it's in the response
     res.json({ success: true, data: request });
   } catch (e) {
     console.error("get request error:", e);
@@ -123,7 +124,7 @@ router.get("/:id/debug", auth, async (req, res) => {
         assignedTo: request.assignedTo,
         customerId: request.userId,
         alreadyRated: !!existingRating,
-        canRate: (request.status === "done" || request.status === "completed") && !!request.assignedTo && !existingRating,
+        canRate: request.status === "completed" && !!request.assignedTo && !existingRating,
         existingRating: existingRating ? {
           rating: existingRating.rating,
           comment: existingRating.comment,
@@ -155,17 +156,17 @@ router.post("/:id/rate", auth, async (req, res) => {
       });
     }
     
-    const request = await AssistRequest.findOne({ _id: id, userId })
-      .populate("assignedTo", "name avatar");
+    const request = await AssistRequest.findOne({ _id: id, userId }).lean();
     
     if (!request) {
       console.log(`❌ Request not found: ${id}`);
       return res.status(404).json({ success: false, msg: "Request not found" });
     }
     
-    console.log(`📋 Request found - Status: ${request.status}, AssignedTo: ${request.assignedTo?._id}`);
+    console.log(`📋 Request found - Status: ${request.status}`);
+    console.log(`📋 acceptedBy: ${(request as any).acceptedBy}, completedBy: ${(request as any).completedBy}, assignedTo: ${(request as any).assignedTo}`);
     
-    if (request.status !== "done" && request.status !== "completed") {
+    if (request.status !== "completed") {
       console.log(`❌ Request not completed - Status: ${request.status}`);
       return res.status(400).json({ 
         success: false, 
@@ -173,43 +174,79 @@ router.post("/:id/rate", auth, async (req, res) => {
       });
     }
     
-    if (!request.assignedTo) {
-      console.log(`❌ No operator assigned`);
+    // Get operatorId from acceptedBy, completedBy, or assignedTo (in that order of priority)
+    const operatorId = (request as any).completedBy || (request as any).acceptedBy || (request as any).assignedTo;
+    
+    if (!operatorId) {
+      console.log(`❌ No operator found - acceptedBy: ${(request as any).acceptedBy}, completedBy: ${(request as any).completedBy}, assignedTo: ${(request as any).assignedTo}`);
       return res.status(400).json({ 
         success: false, 
-        msg: "No operator assigned to this request" 
+        msg: "No operator found for this request" 
       });
     }
     
+    // Convert to string for consistency and ensure they're valid ObjectIds
+    const operatorIdStr = typeof operatorId === "string" ? operatorId : String(operatorId._id || operatorId);
+    const customerIdStr = userId; // userId is already a string from req.user?.id
+    const assistRequestIdStr = id;
+    
+    // Validate ObjectIds format (24 hex characters)
+    const objectIdRegex = /^[0-9a-fA-F]{24}$/;
+    if (!objectIdRegex.test(customerIdStr)) {
+      console.error(`❌ Invalid customerId format: ${customerIdStr}`);
+      return res.status(400).json({ success: false, msg: "Invalid customer ID format" });
+    }
+    if (!objectIdRegex.test(operatorIdStr)) {
+      console.error(`❌ Invalid operatorId format: ${operatorIdStr}`);
+      return res.status(400).json({ success: false, msg: "Invalid operator ID format" });
+    }
+    if (!objectIdRegex.test(assistRequestIdStr)) {
+      console.error(`❌ Invalid assistRequestId format: ${assistRequestIdStr}`);
+      return res.status(400).json({ success: false, msg: "Invalid request ID format" });
+    }
+    
+    console.log(`✅ Validated IDs - Customer: ${customerIdStr}, Operator: ${operatorIdStr}, Request: ${assistRequestIdStr}`);
+    
     // Check if already rated
-    const existingRating = await Rating.findOne({ assistRequestId: id });
+    const existingRating = await Rating.findOne({ assistRequestId: assistRequestIdStr });
     if (existingRating) {
-      console.log(`❌ Already rated - Rating: ${existingRating.rating}`);
+      console.log(`❌ Already rated - Rating ID: ${existingRating._id}, Rating: ${existingRating.rating}`);
       return res.status(400).json({ 
         success: false, 
         msg: "Request already rated" 
       });
     }
     
-    console.log(`✅ Creating rating for operator: ${request.assignedTo._id}`);
+    console.log(`✅ Creating rating for operator: ${operatorIdStr}`);
     
-    // Create rating
+    // Create rating with explicit ObjectIds (Mongoose will convert strings to ObjectIds)
     const newRating = await Rating.create({
-      assistRequestId: id,
-      customerId: userId,
-      operatorId: request.assignedTo._id,
-      rating,
-      comment: comment || undefined
+      assistRequestId: assistRequestIdStr, // ObjectId from customer.assistrequests
+      customerId: customerIdStr,           // ObjectId from customer.users
+      operatorId: operatorIdStr,           // ObjectId from appdb.users
+      rating: Number(rating),              // Ensure it's a number
+      comment: comment ? String(comment).trim() : undefined
     });
     
-    console.log(`✅ Rating created successfully: ${newRating._id}`);
+    console.log(`✅ Rating created successfully:`);
+    console.log(`   - Rating ID: ${newRating._id}`);
+    console.log(`   - AssistRequest ID: ${newRating.assistRequestId}`);
+    console.log(`   - Customer ID: ${newRating.customerId}`);
+    console.log(`   - Operator ID: ${newRating.operatorId}`);
+    console.log(`   - Rating: ${newRating.rating}`);
+    console.log(`   - Comment: ${newRating.comment || "none"}`);
     
     res.json({ 
       success: true, 
       data: {
+        _id: newRating._id,
+        assistRequestId: newRating.assistRequestId,
+        customerId: newRating.customerId,
+        operatorId: newRating.operatorId,
         rating: newRating.rating,
         comment: newRating.comment,
-        operatorName: (request.assignedTo as any).name
+        createdAt: newRating.createdAt,
+        updatedAt: newRating.updatedAt
       }
     });
   } catch (e) {
@@ -218,15 +255,15 @@ router.post("/:id/rate", auth, async (req, res) => {
   }
 });
 
-/** Update assist request status to done (for testing) */
-router.post("/:id/mark-done", auth, async (req, res) => {
+/** Update assist request status to completed (for testing) */
+router.post("/:id/mark-completed", auth, async (req, res) => {
   try {
     const id = String(req.params.id || "");
     const userId = String(req.user?.id || "");
     
     const request = await AssistRequest.findOneAndUpdate(
       { _id: id, userId },
-      { status: "done" },
+      { status: "completed" },
       { new: true }
     );
     
@@ -234,10 +271,10 @@ router.post("/:id/mark-done", auth, async (req, res) => {
       return res.status(404).json({ success: false, msg: "Request not found" });
     }
     
-    console.log(`✅ Request ${id} marked as done`);
+    console.log(`✅ Request ${id} marked as completed`);
     res.json({ success: true, data: { status: request.status } });
   } catch (e) {
-    console.error("mark-done error:", e);
+    console.error("mark-completed error:", e);
     res.status(500).json({ success: false, msg: "Server Error" });
   }
 });
@@ -290,7 +327,7 @@ router.get("/operator/:operatorId/ratings", auth, async (req, res) => {
   }
 });
 
-/** Cancel an assist request */
+/** Cancel an assist request - deletes the request instead of changing status */
 router.post("/:id/cancel", auth, async (req, res) => {
   try {
     const id = String(req.params.id || "");
@@ -302,11 +339,11 @@ router.post("/:id/cancel", auth, async (req, res) => {
     }
     
     if (request.status !== "pending" && request.status !== "accepted") {
-      return res.status(400).json({ success: false, msg: "Cannot cancel this request" });
+      return res.status(400).json({ success: false, msg: "Cannot cancel a completed request" });
     }
     
-    request.status = "canceled";
-    await request.save();
+    // Delete the request instead of changing status
+    await AssistRequest.findByIdAndDelete(id);
     
     res.json({ success: true });
   } catch (e) {

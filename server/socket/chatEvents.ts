@@ -1,86 +1,228 @@
-// server/socket/chatEvents.ts
 import { Server as SocketIOServer, Socket } from "socket.io";
 import Conversation from "../modals/Conversation";
 import ConversationMeta from "../modals/ConversationMeta";
 import Message from "../modals/Message";
+import User from "../modals/User";
+import { getAppdbConnection } from "../config/db";
+import { Schema, Types } from "mongoose";
 
+/** ---------------- helpers ---------------- */
+function isValidObjectId(id: any): boolean {
+  if (!id) return false;
+  const idStr = String(id);
+  return Types.ObjectId.isValid(idStr) && idStr.length === 24;
+}
+
+async function getUserFromEitherDb(userId: string): Promise<any> {
+  if (!userId || !isValidObjectId(userId)) return null;
+
+  // customer DB
+  const user = await User.findById(userId)
+    .select("name username avatar email _id")
+    .lean();
+  if (user) {
+    const username = (user as any).username || "";
+    return {
+      _id: user._id,
+      name: user.name || username || "Unknown",
+      username,
+      avatar: user.avatar || "",
+      email: user.email || "",
+    };
+  }
+
+  // appdb (operators)
+  try {
+    const appdbConnection = getAppdbConnection();
+    const AppdbUserSchema = new Schema(
+      { username: String, name: String, email: String, avatar: String, phone: String },
+      { collection: "users", strict: false }
+    );
+    const AppdbUser =
+      appdbConnection.models.User || appdbConnection.model("User", AppdbUserSchema);
+
+    const appdbUser: any = await AppdbUser.findById(userId)
+      .select("username name avatar email _id")
+      .lean();
+
+    if (appdbUser) {
+      return {
+        _id: appdbUser._id,
+        name: appdbUser.username || appdbUser.name || "Unknown",
+        username: appdbUser.username || "",
+        avatar: appdbUser.avatar || "",
+        email: appdbUser.email || "",
+      };
+    }
+  } catch (error) {
+    console.error("Error fetching from appdb:", error);
+  }
+  return null;
+}
+
+/** Populate participants from customer + appdb */
+export async function populateParticipantsFromBothDbs(participantIds: any[]): Promise<any[]> {
+  const validIds = (participantIds || [])
+    .filter((id) => isValidObjectId(id))
+    .map((id) => String(id));
+
+  if (!validIds.length) return [];
+
+  const customerUsers = await User.find({ _id: { $in: validIds } })
+    .select("name username avatar email _id")
+    .lean();
+
+  const foundIds = new Set(customerUsers.map((u) => String(u._id)));
+  const missingIds = validIds.filter((id) => !foundIds.has(id));
+
+  let appdbUsers: any[] = [];
+  if (missingIds.length) {
+    try {
+      const appdbConnection = getAppdbConnection();
+      const AppdbUserSchema = new Schema(
+        { username: String, name: String, email: String, avatar: String, phone: String },
+        { collection: "users", strict: false }
+      );
+      const AppdbUser =
+        appdbConnection.models.User || appdbConnection.model("User", AppdbUserSchema);
+      appdbUsers = await AppdbUser.find({ _id: { $in: missingIds } })
+        .select("username name avatar email _id")
+        .lean();
+    } catch (error) {
+      console.error("Error fetching from appdb:", error);
+    }
+  }
+
+  const allUsers = [...customerUsers, ...appdbUsers];
+  const isCustomer = (id: string) => customerUsers.some((u) => String(u._id) === id);
+
+  const map = new Map(
+    allUsers.map((u: any) => {
+      const id = String(u._id);
+      const displayName = isCustomer(id)
+        ? (u.name || u.username || "Unknown")
+        : (u.username || u.name || "Unknown");
+      return [
+        id,
+        {
+          _id: u._id,
+          name: displayName,
+          username: u.username || "",
+          avatar: u.avatar || "",
+          email: u.email || "",
+        },
+      ];
+    })
+  );
+
+  return validIds.map(
+    (id) =>
+      map.get(id) || {
+        _id: id,
+        name: "Unknown User",
+        avatar: "",
+        email: "",
+      }
+  );
+}
+
+/** ---------------- events ---------------- */
 export function registerChatEvents(io: SocketIOServer, socket: Socket) {
-  /** ================= getConversations ================= */
+  /** getConversations */
   socket.on("getConversations", async () => {
     try {
       const userId = socket.data.userId;
-      if (!userId) {
-        socket.emit("getConversations", {
-          success: false,
-          msg: "Unauthorized",
-        });
-        return;
-      }
+      if (!userId)
+        return socket.emit("getConversations", { success: false, msg: "Unauthorized" });
 
       const conversations = await Conversation.find({ participants: userId })
         .sort({ updatedAt: -1 })
-        .populate({
-          path: "lastMessage",
-          select: "content senderId attachment createdAt conversationId",
-        })
-        .populate({ path: "participants", select: "name avatar email" })
         .lean();
 
-      console.log(`📋 Retrieved ${conversations.length} conversations for user ${userId}`);
-      conversations.forEach(conv => {
-        console.log(`💬 Conversation ${conv._id}: ${conv.name || 'Unnamed'} - ${conv.participants.length} participants`);
-        console.log(`   Participants: ${conv.participants.map((p: any) => `${p.name} (${p._id})`).join(', ')}`);
-      });
+      const conversationsWithParticipants = await Promise.all(
+        conversations.map(async (conv: any) => {
+          const populatedParticipants = await populateParticipantsFromBothDbs(conv.participants || []);
+
+          // lastMessage: try direct reference; if missing, fallback to newest Message
+          let lastMessageData: any = null;
+          if (conv.lastMessage) {
+            try {
+              lastMessageData = await Message.findById(conv.lastMessage)
+                .select("content senderId attachment createdAt conversationId")
+                .lean();
+            } catch {
+              lastMessageData = null;
+            }
+          }
+          if (!lastMessageData) {
+            lastMessageData = await Message.findOne({ conversationId: conv._id })
+              .sort({ createdAt: -1 })
+              .select("content senderId attachment createdAt conversationId")
+              .lean();
+          }
+          if (lastMessageData?.senderId) {
+            const sender = await getUserFromEitherDb(String(lastMessageData.senderId));
+            if (sender) lastMessageData.senderId = sender;
+          }
+
+          return {
+            ...conv,
+            participants: populatedParticipants,
+            lastMessage: lastMessageData,
+          };
+        })
+      );
 
       const convIds = conversations.map((c) => c._id);
       const metas = await ConversationMeta.find({
         conversationId: { $in: convIds },
         userId,
       })
-        .select("conversationId unreadCount")
+        .select("conversationId unreadCount unread")
         .lean();
 
       const metaMap = new Map<string, number>();
       metas.forEach((m: any) =>
-        metaMap.set(m.conversationId.toString(), m.unreadCount ?? 0)
+        metaMap.set(String(m.conversationId), Number(m.unreadCount ?? m.unread ?? 0))
       );
 
-      const withUnread = conversations.map((c) => ({
+      const withUnread = conversationsWithParticipants.map((c) => ({
         ...c,
-        unreadCount: metaMap.get(c._id.toString()) ?? 0,
+        unreadCount: metaMap.get(String(c._id)) ?? 0,
       }));
 
       socket.emit("getConversations", { success: true, data: withUnread });
     } catch (error: any) {
       console.log("getConversations error:", error);
-      socket.emit("getConversations", {
-        success: false,
-        msg: "Failed to fetch conversations",
-      });
+      socket.emit("getConversations", { success: false, msg: "Failed to fetch conversations" });
     }
   });
 
-  /** ================= newConversation ================= */
-54  /** Creates direct 1-on-1 conversation between customer and operator */
+  /** newConversation — direct 1:1 customer ↔ operator */
+  // (line number label in your file was "54", safe to keep content only)
   socket.on("newConversation", async (data) => {
     try {
-      // Check if direct conversation already exists between these 2 participants
       const existingConversation = await Conversation.findOne({
         type: "direct",
         participants: { $all: data.participants, $size: 2 },
-      })
-        .populate({ path: "participants", select: "name avatar email" })
-        .lean();
+      }).lean();
 
       if (existingConversation) {
+        const populatedParticipants = await populateParticipantsFromBothDbs(
+          existingConversation.participants || []
+        );
         socket.emit("newConversation", {
           success: true,
-          data: { ...existingConversation, isNew: false, unreadCount: 0 },
+          data: {
+            ...existingConversation,
+            participants: populatedParticipants,
+            isNew: false,
+            unreadCount: 0,
+          },
         });
         return;
       }
 
-      // Create new direct conversation (customer ↔ operator)
       const conversation = await Conversation.create({
         type: "direct",
         participants: data.participants,
@@ -89,53 +231,50 @@ export function registerChatEvents(io: SocketIOServer, socket: Socket) {
         createdBy: socket.data.userId,
       });
 
-      // Initialize conversation metadata for both participants
+      // Initialize meta (write both unreadCount & legacy unread)
       await Promise.all(
         data.participants.map((uid: string) =>
           ConversationMeta.findOneAndUpdate(
             { conversationId: conversation._id, userId: uid },
-            { $setOnInsert: { unreadCount: 0 } },
+            { $setOnInsert: { unreadCount: 0, unread: 0 } },
             { upsert: true, new: true }
           )
         )
       );
 
-      // Join both participants to the conversation room
-      const connectedSockets = Array.from(io.sockets.sockets.values()).filter(
-        (s) => data.participants.map(String).includes(String(s.data.userId))
+      // join room for connected sockets
+      const connectedSockets = Array.from(io.sockets.sockets.values()).filter((s) =>
+        data.participants.map(String).includes(String(s.data.userId))
       );
-      connectedSockets.forEach((s) => s.join(conversation._id.toString()));
+      connectedSockets.forEach((s) => s.join(String(conversation._id)));
 
-      // Send populated conversation to both participants
-      const populatedConversation = await Conversation.findById(
-        conversation._id
-      )
-        .populate({ path: "participants", select: "name avatar email" })
-        .lean();
+      const populatedConversation = await Conversation.findById(conversation._id).lean();
+      const populatedParticipants = await populateParticipantsFromBothDbs(
+        populatedConversation?.participants || []
+      );
 
-      const payload = { ...populatedConversation, isNew: true, unreadCount: 0 };
+      const payload = {
+        ...populatedConversation,
+        participants: populatedParticipants,
+        isNew: true,
+        unreadCount: 0,
+      };
 
       connectedSockets.forEach((s) =>
         s.emit("newConversation", { success: true, data: payload })
       );
     } catch (error: any) {
       console.log("newConversation error:", error);
-      socket.emit("newConversation", {
-        success: false,
-        msg: "failed to created conversation",
-      });
+      socket.emit("newConversation", { success: false, msg: "failed to created conversation" });
     }
   });
 
-  /** ================= deleteConversation ================= */
+  /** deleteConversation (unchanged from your version) */
   socket.on("deleteConversation", async (conversationId: string) => {
     try {
       const userId = String(socket.data.userId || "");
       if (!userId)
-        return socket.emit("deleteConversation", {
-          success: false,
-          msg: "Unauthorized",
-        });
+        return socket.emit("deleteConversation", { success: false, msg: "Unauthorized" });
 
       const convo = await Conversation.findById(conversationId)
         .select("participants")
@@ -148,77 +287,53 @@ export function registerChatEvents(io: SocketIOServer, socket: Socket) {
 
       const isParticipant = convo.participants.map(String).includes(userId);
       if (!isParticipant)
-        return socket.emit("deleteConversation", {
-          success: false,
-          msg: "Forbidden",
-        });
+        return socket.emit("deleteConversation", { success: false, msg: "Forbidden" });
 
-      // hard delete messages + meta + conversation
       await Message.deleteMany({ conversationId });
       await ConversationMeta.deleteMany({ conversationId });
       await Conversation.findByIdAndDelete(conversationId);
 
-      // notify every connected participant and make them leave the room
       const participantIds = convo.participants.map(String);
-
       for (const [sid, s] of io.sockets.sockets) {
         const uid = String(s.data?.userId || "");
         if (participantIds.includes(uid)) {
           s.leave(conversationId);
-          io.to(sid).emit("conversationDeleted", {
-            success: true,
-            conversationId,
-          });
+          io.to(sid).emit("conversationDeleted", { success: true, conversationId });
         }
       }
 
-      // ack the requester
       socket.emit("deleteConversation", { success: true });
     } catch (e) {
       console.error("deleteConversation error:", e);
-      socket.emit("deleteConversation", {
-        success: false,
-        msg: "Failed to delete conversation",
-      });
+      socket.emit("deleteConversation", { success: false, msg: "Failed to delete conversation" });
     }
   });
 
-  /** ================= Verify Conversation Participants ================= */
+  /** verifyConversationParticipants (unchanged behavior) */
   socket.on("verifyConversationParticipants", async (conversationId: string) => {
     try {
       const userId = socket.data.userId;
-      if (!userId) {
-        socket.emit("verifyConversationParticipants", {
-          success: false,
-          msg: "Unauthorized",
-        });
-        return;
-      }
+      if (!userId)
+        return socket.emit("verifyConversationParticipants", { success: false, msg: "Unauthorized" });
 
-      const conversation = await Conversation.findById(conversationId)
-        .populate('participants', 'name email _id')
-        .lean();
+      const conversation = await Conversation.findById(conversationId).lean();
+      const populatedParticipants = await populateParticipantsFromBothDbs(
+        conversation?.participants || []
+      );
 
-      if (!conversation) {
-        socket.emit("verifyConversationParticipants", {
+      if (!conversation)
+        return socket.emit("verifyConversationParticipants", {
           success: false,
           msg: "Conversation not found",
         });
-        return;
-      }
-
-      console.log(`🔍 Verifying conversation ${conversationId} participants:`);
-      console.log(`   Participants: ${conversation.participants.map((p: any) => `${p.name} (${p._id})`).join(', ')}`);
-      console.log(`   Current user: ${userId}`);
-      console.log(`   User is participant: ${conversation.participants.some((p: any) => String(p._id) === String(userId))}`);
 
       socket.emit("verifyConversationParticipants", {
         success: true,
         data: {
           conversationId,
-          participants: conversation.participants,
+          participants: populatedParticipants,
           currentUser: userId,
-          isParticipant: conversation.participants.some((p: any) => String(p._id) === String(userId))
+          isParticipant: populatedParticipants.some((p: any) => String(p._id) === String(userId)),
         },
       });
     } catch (error: any) {
@@ -229,5 +344,4 @@ export function registerChatEvents(io: SocketIOServer, socket: Socket) {
       });
     }
   });
-
 }
