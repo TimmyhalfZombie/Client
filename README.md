@@ -21,10 +21,10 @@
 
 This is an **IT Capstone Research Project** developed as part of our academic requirements. The system consists of two separate mobile applications:
 
-| App                 | Purpose                                               | Repository                                                    |
-| ------------------- | ----------------------------------------------------- | ------------------------------------------------------------- |
-| 🚗 **Customer App** | For users requesting roadside assistance              | This repository                                               |
-| 🔧 **Operator App** | For service providers accepting & fulfilling requests | [operator-rider](https://github.com/CJBLACK24/operator-rider) |
+| App                 | Purpose                                               | Repository                                              |
+| ------------------- | ----------------------------------------------------- | ------------------------------------------------------- |
+| 🚗 **Customer App** | For users requesting roadside assistance              | This repository                                         |
+| 🔧 **Operator App** | For service providers accepting & fulfilling requests | [Operator](https://github.com/TimmyhalfZombie/Operator) |
 
 ### 🎓 Academic Context
 
