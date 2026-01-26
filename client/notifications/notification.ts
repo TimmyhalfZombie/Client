@@ -41,14 +41,17 @@ export async function ensureNotificationCategories() {
   }
 }
 
-export async function registerForPushNotificationsAsync(): Promise<string | null> {
+export async function registerForPushNotificationsAsync(): Promise<
+  string | null
+> {
   try {
     if (!Device.isDevice) {
       console.log("Push notifications require a physical device.");
       return null;
     }
 
-    const { status: existingStatus } = await Notifications.getPermissionsAsync();
+    const { status: existingStatus } =
+      await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
 
     if (existingStatus !== "granted") {
@@ -65,13 +68,14 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
     if (Platform.OS === "android") {
       if (!isAndroidFcmConfigured()) {
         console.log(
-          "Android push token skipped: FCM not configured. Foreground local notifications will still work."
+          "Android push token skipped: FCM not configured. Foreground local notifications will still work.",
         );
         await Notifications.setNotificationChannelAsync("default", {
           name: "Default",
           importance: Notifications.AndroidImportance.MAX,
           vibrationPattern: [0, 250, 250, 250],
-          lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+          lockscreenVisibility:
+            Notifications.AndroidNotificationVisibility.PUBLIC,
           sound: "default",
         });
         return null;
@@ -82,14 +86,16 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
       (Constants as any)?.expoConfig?.extra?.eas?.projectId ??
       (Constants as any)?.easConfig?.projectId;
 
-    const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
+    const token = (await Notifications.getExpoPushTokenAsync({ projectId }))
+      .data;
 
     if (Platform.OS === "android") {
       await Notifications.setNotificationChannelAsync("default", {
         name: "Default",
         importance: Notifications.AndroidImportance.MAX,
         vibrationPattern: [0, 250, 250, 250],
-        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+        lockscreenVisibility:
+          Notifications.AndroidNotificationVisibility.PUBLIC,
         sound: "default",
       });
     }
@@ -101,7 +107,9 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
   }
 }
 
-function guessUti(urlOrName: string): "public.png" | "public.jpeg" | "public.image" {
+function guessUti(
+  urlOrName: string,
+): "public.png" | "public.jpeg" | "public.image" {
   // With noUncheckedIndexedAccess, array indexing can be undefined. Guard it.
   const first = urlOrName.split("?")[0] ?? urlOrName;
   const lower = first.toLowerCase();
@@ -122,7 +130,7 @@ function getWritableDir(): string | null {
 }
 
 async function prepareIosAvatarAttachment(
-  avatarUrl: string
+  avatarUrl: string,
 ): Promise<Notifications.NotificationContentAttachmentIos | undefined> {
   try {
     const dir = getWritableDir();
@@ -159,7 +167,11 @@ export async function showLocalMessageNotification(params: {
   const { senderName, preview, conversationId, avatarUrl } = params;
 
   let attachments: Notifications.NotificationContentAttachmentIos[] | undefined;
-  if (Platform.OS === "ios" && typeof avatarUrl === "string" && avatarUrl.length > 0) {
+  if (
+    Platform.OS === "ios" &&
+    typeof avatarUrl === "string" &&
+    avatarUrl.length > 0
+  ) {
     const att = await prepareIosAvatarAttachment(avatarUrl);
     attachments = att ? [att] : undefined;
   }
@@ -183,5 +195,31 @@ export async function showLocalMessageNotification(params: {
     });
   } catch (e) {
     console.log("showLocalMessageNotification error:", e);
+  }
+}
+export async function showLocalAssistNotification(params: {
+  title: string;
+  body: string;
+  assistId?: string;
+  status: string;
+}) {
+  const { title, body, assistId, status } = params;
+
+  try {
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title,
+        body,
+        sound: "default",
+        data: {
+          type: "assist_status",
+          assistId,
+          status,
+        },
+      },
+      trigger: null,
+    });
+  } catch (e) {
+    console.log("showLocalAssistNotification error:", e);
   }
 }

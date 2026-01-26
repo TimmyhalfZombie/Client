@@ -23,7 +23,7 @@ export interface UserProps {
   id: string;
   email: string;
   name: string;
-  phone: string | null;  // Explicit null allowed
+  phone: string | null; // Explicit null allowed
   avatar: string | null; // Explicit null allowed
 }
 
@@ -56,7 +56,7 @@ export type AuthContextProps = {
     password: string,
     name: string,
     avatar?: string,
-    phone?: string
+    phone?: string,
   ) => Promise<void>;
   signOut: () => Promise<void>;
   updateToken: (token: string) => Promise<void>;
@@ -176,7 +176,7 @@ export interface User {
   email: string;
 }
 
-export interface AssistRequestWithUser extends Omit<AssistRequest, 'userId'> {
+export interface AssistRequestWithUser extends Omit<AssistRequest, "userId"> {
   userId: User;
 }
 
@@ -229,7 +229,12 @@ export type Step = {
 };
 
 // EnRoute Manager Types (moved from EnRouteManager.tsx)
-export type OperatorStatusKind = "en_route" | "arrived" | "working" | "completed";
+export type OperatorStatusKind =
+  | "en_route"
+  | "arrived"
+  | "working"
+  | "completed"
+  | "idle";
 
 export type OperatorInfo = {
   id?: string;

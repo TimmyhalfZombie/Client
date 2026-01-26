@@ -28,7 +28,7 @@ export function initializeSocket(server: any): SocketIOServer {
     pingTimeout: 25000,
     pingInterval: 20000,
   });
-  
+
   ioInstance = io;
 
   io.use((socket: Socket, next) => {
@@ -44,7 +44,7 @@ export function initializeSocket(server: any): SocketIOServer {
         socket.data = userData;
         (socket.data as any).userId = userData.id;
         next();
-      }
+      },
     );
   });
 
@@ -57,11 +57,17 @@ export function initializeSocket(server: any): SocketIOServer {
     registerMessageEvents(io, socket);
     registerAssistEvents(io, socket);
 
+    // Join personal room for system notifications
+    socket.join(String(userId));
+    console.log(`🏠 User ${userId} joined personal room`);
+
     try {
       const conversations = await Conversation.find({
         participants: userId,
       }).select("_id");
-      console.log(`🔌 User ${userId} joining ${conversations.length} conversation rooms`);
+      console.log(
+        `🔌 User ${userId} joining ${conversations.length} conversation rooms`,
+      );
       conversations.forEach((c) => {
         socket.join(String(c._id));
         console.log(`🔌 User ${userId} joined room ${c._id}`);

@@ -14,6 +14,8 @@ import * as Icons from "phosphor-react-native";
 import { useCurrentAddress } from "@/hooks/useCurrentAddress";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { API_URL } from "@/constants";
+import { getSocket } from "@/socket/socket";
+import { onAssistStatus } from "@/socket/socketEvents";
 
 const Card = ({ children, style }: any) => (
   <View style={[styles.card, style]}>{children}</View>
@@ -23,7 +25,10 @@ const Card = ({ children, style }: any) => (
 function splitAddress(full?: string): { title: string; sub?: string } {
   const safe = (full ?? "").trim();
   if (!safe) return { title: "Your location" };
-  const parts = safe.split(",").map((s) => s.trim()).filter(Boolean);
+  const parts = safe
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
   const title = parts[0] ?? "Your location";
   const sub = parts.length > 1 ? parts.slice(1).join(", ") : undefined;
   return { title, sub };
@@ -32,11 +37,13 @@ function splitAddress(full?: string): { title: string; sub?: string } {
 export default function TrackActivity() {
   // id can be string | string[] | undefined in expo-router
   const params = useLocalSearchParams<{ id?: string | string[] }>();
-  const id = Array.isArray(params.id) ? params.id[0] : params.id ?? "";
+  const id = Array.isArray(params.id) ? params.id[0] : (params.id ?? "");
   const [item, setItem] = useState<ActivityItem | null>(null);
   const [loading, setLoading] = useState(false);
   const [operatorUsername, setOperatorUsername] = useState<string | null>(null);
-  const [operatorInitialAddress, setOperatorInitialAddress] = useState<string | null>(null);
+  const [operatorInitialAddress, setOperatorInitialAddress] = useState<
+    string | null
+  >(null);
   const insets = useSafeAreaInsets();
 
   const { locating, address } = useCurrentAddress();
@@ -44,15 +51,41 @@ export default function TrackActivity() {
   const origin = useMemo(() => splitAddress(address ?? ""), [address]);
 
   useEffect(() => {
-    (async () => {
+    const fetchItem = async () => {
       const items = await getActivity();
-      setItem(
-        items.find(
-          (i) => i.id === id || String(i.meta?.assistId ?? "") === String(id)
-        ) || null
+      const found = items.find(
+        (i) => i.id === id || String(i.meta?.assistId ?? "") === String(id),
       );
-    })();
-  }, [id]);
+      setItem(found || null);
+    };
+
+    fetchItem();
+
+    // Socket listener for status updates
+    const socket = getSocket();
+    if (socket) {
+      const handleStatus = (evt: any) => {
+        if (!evt?.success || !evt?.data) return;
+        const srvId = String(evt.data.id || "");
+        if (srvId && (srvId === id || srvId === item?.meta?.assistId)) {
+          console.log("📍 Track: Status update received", evt.data.status);
+          fetchItem(); // Refresh local item
+        }
+      };
+
+      onAssistStatus(handleStatus);
+      const interval = setInterval(fetchItem, 3000); // Polling as fallback
+
+      return () => {
+        onAssistStatus(handleStatus, true);
+        clearInterval(interval);
+      };
+    } else {
+      // Fallback for no socket
+      const interval = setInterval(fetchItem, 3000);
+      return () => clearInterval(interval);
+    }
+  }, [id, item?.meta?.assistId]);
 
   // Fetch operator data from appdb using acceptedBy
   useEffect(() => {
@@ -68,22 +101,33 @@ export default function TrackActivity() {
     (async () => {
       try {
         // Fetch assist request to get acceptedBy
-        const assistRequest = await assistService.fetchAssistRequestById(assistId);
+        const assistRequest =
+          await assistService.fetchAssistRequestById(assistId);
         if (!assistRequest) return;
 
         // Get operator ID from acceptedBy or assignedTo
         const acceptedBy = (assistRequest as any)?.acceptedBy;
         const assignedTo = (assistRequest as any)?.assignedTo;
-        const operatorId = acceptedBy 
-          ? (typeof acceptedBy === "string" ? acceptedBy : acceptedBy._id || acceptedBy.id)
-          : (assignedTo ? (typeof assignedTo === "string" ? assignedTo : assignedTo._id || assignedTo.id) : null);
-        
+        const operatorId = acceptedBy
+          ? typeof acceptedBy === "string"
+            ? acceptedBy
+            : acceptedBy._id || acceptedBy.id
+          : assignedTo
+            ? typeof assignedTo === "string"
+              ? assignedTo
+              : assignedTo._id || assignedTo.id
+            : null;
+
         if (!operatorId) {
           // Fallback: try to get from meta
           const op = (item?.meta as any)?.operator;
           if (op?.username) {
             const username = op.username.trim();
-            if (username && username.toUpperCase() !== "CJBLACK" && username.toLowerCase() !== "cjblack") {
+            if (
+              username &&
+              username.toUpperCase() !== "CJBLACK" &&
+              username.toLowerCase() !== "cjblack"
+            ) {
               setOperatorUsername(username);
             }
           }
@@ -125,14 +169,18 @@ export default function TrackActivity() {
 
         if (operatorData) {
           const data = operatorData.data || operatorData;
-          
+
           if (data?.username) {
             const username = data.username.trim();
-            if (username && username.toUpperCase() !== "CJBLACK" && username.toLowerCase() !== "cjblack") {
+            if (
+              username &&
+              username.toUpperCase() !== "CJBLACK" &&
+              username.toLowerCase() !== "cjblack"
+            ) {
               setOperatorUsername(username);
             }
           }
-          
+
           if (data?.initial_address) {
             const address = data.initial_address.trim();
             if (address) {
@@ -144,7 +192,11 @@ export default function TrackActivity() {
           const op = (item?.meta as any)?.operator;
           if (op?.username) {
             const username = op.username.trim();
-            if (username && username.toUpperCase() !== "CJBLACK" && username.toLowerCase() !== "cjblack") {
+            if (
+              username &&
+              username.toUpperCase() !== "CJBLACK" &&
+              username.toLowerCase() !== "cjblack"
+            ) {
               setOperatorUsername(username);
             }
           }
@@ -159,7 +211,11 @@ export default function TrackActivity() {
         const op = (item?.meta as any)?.operator;
         if (op?.username) {
           const username = op.username.trim();
-          if (username && username.toUpperCase() !== "CJBLACK" && username.toLowerCase() !== "cjblack") {
+          if (
+            username &&
+            username.toUpperCase() !== "CJBLACK" &&
+            username.toLowerCase() !== "cjblack"
+          ) {
             setOperatorUsername(username);
           }
         }
@@ -174,38 +230,64 @@ export default function TrackActivity() {
   const operatorName = useMemo(() => {
     const name = (item?.meta as any)?.operator?.name;
     // Always return "Operator" if name is missing or is test data like "CJBLACK"
-    if (!name || 
-        name.trim() === "" || 
-        name.trim().toUpperCase() === "CJBLACK" || 
-        name.trim().toLowerCase() === "cjblack") {
+    if (
+      !name ||
+      name.trim() === "" ||
+      name.trim().toUpperCase() === "CJBLACK" ||
+      name.trim().toLowerCase() === "cjblack"
+    ) {
       return "Operator";
     }
     return name.trim();
   }, [item]);
 
   const operatorAvatar = useMemo(
-    () => ((item?.meta as any)?.operator?.avatar ?? null),
-    [item]
+    () => (item?.meta as any)?.operator?.avatar ?? null,
+    [item],
   );
 
   // Get operator location from meta (stored when request was accepted)
   const operatorLocation = useMemo(() => {
     return (item?.meta as any)?.operatorLocation || null;
-    
   }, [item]);
-  
+
   // Get operator username/fullName for display
   const operatorDisplayName = useMemo(() => {
     const op = (item?.meta as any)?.operator;
     if (!op) return "Operator";
     // Prefer fullName, then name, then username
     const name = op.fullName || op.name || op.username;
-    if (!name || name.trim().toUpperCase() === "CJBLACK" || name.trim().toLowerCase() === "cjblack") {
+    if (
+      !name ||
+      name.trim().toUpperCase() === "CJBLACK" ||
+      name.trim().toLowerCase() === "cjblack"
+    ) {
       return "Operator";
     }
     return name.trim();
   }, [item]);
 
+  // Calculate progress percentage based on status
+  const progressPercent = useMemo(() => {
+    if (!item) return "0%";
+    const s = item.status.toLowerCase();
+    switch (s) {
+      case "pending":
+        return "10%";
+      case "accepted":
+        return "30%";
+      case "en_route":
+        return "60%";
+      case "arrived":
+        return "85%";
+      case "working":
+        return "95%";
+      case "completed":
+        return "100%";
+      default:
+        return "5%";
+    }
+  }, [item]);
 
   // Format destination address from item data
   const destinationAddress = useMemo(() => {
@@ -222,7 +304,10 @@ export default function TrackActivity() {
   }, [item]);
 
   // Split destination address for display
-  const destination = useMemo(() => splitAddress(destinationAddress), [destinationAddress]);
+  const destination = useMemo(
+    () => splitAddress(destinationAddress),
+    [destinationAddress],
+  );
 
   const handleCancelRequest = async () => {
     if (!item) return;
@@ -244,16 +329,22 @@ export default function TrackActivity() {
                   { text: "OK", onPress: () => router.back() },
                 ]);
               } else {
-                Alert.alert("Error", "Failed to cancel request. Please try again.");
+                Alert.alert(
+                  "Error",
+                  "Failed to cancel request. Please try again.",
+                );
               }
             } catch {
-              Alert.alert("Error", "Failed to cancel request. Please try again.");
+              Alert.alert(
+                "Error",
+                "Failed to cancel request. Please try again.",
+              );
             } finally {
               setLoading(false);
             }
           },
         },
-      ]
+      ],
     );
   };
 
@@ -263,7 +354,12 @@ export default function TrackActivity() {
     <ScreenWrapper style={{ paddingTop: 0 }}>
       <View style={{ paddingHorizontal: spacingX._15 }}>
         {/* Back Button */}
-        <View style={{ marginTop: Math.max(0, insets.top - 8), marginBottom: spacingY._5 }}>
+        <View
+          style={{
+            marginTop: Math.max(0, insets.top - 8),
+            marginBottom: spacingY._5,
+          }}
+        >
           <BackButton />
         </View>
 
@@ -277,10 +373,14 @@ export default function TrackActivity() {
               <Typo size={14} color={colors.green} fontWeight="900">
                 On time
               </Typo>
-              <Typo size={14} color={colors.neutral300}>• Operator on route</Typo>
+              <Typo size={14} color={colors.neutral300}>
+                • Operator on route
+              </Typo>
             </>
           ) : (
-            <Typo size={14} color={colors.neutral400}>Waiting for operator to accept</Typo>
+            <Typo size={14} color={colors.neutral400}>
+              Waiting for operator to accept
+            </Typo>
           )}
         </View>
 
@@ -288,34 +388,50 @@ export default function TrackActivity() {
         <View style={styles.progressWrap}>
           <Icons.Wrench size={16} color={colors.green} weight="bold" />
           <View style={styles.progressBar}>
-            <View style={styles.progressFill} />
+            <View style={[styles.progressFill, { width: progressPercent }]} />
           </View>
           <Icons.Wrench size={16} color={colors.green} weight="bold" />
         </View>
 
-        <Typo size={13} color={colors.neutral200} style={{ marginTop: spacingY._5 }}>
-          {item.status === "accepted" 
-            ? `${operatorDisplayName} is on the way there.`
-            : "Waiting for an operator to accept your request..."
-          }
+        <Typo
+          size={13}
+          color={colors.neutral200}
+          style={{ marginTop: spacingY._5 }}
+        >
+          {item.status === "completed"
+            ? "Your assistance request has been completed!"
+            : item.status === "accepted" || item.status === "en_route"
+              ? `${operatorDisplayName} is on the way there.`
+              : item.status === "arrived"
+                ? `${operatorDisplayName} has arrived at your location.`
+                : "Waiting for an operator to accept your request..."}
         </Typo>
 
         {/* Operator card - only show when accepted (not when completed) */}
         {item.status === "accepted" && (
           <Card style={{ marginTop: spacingY._10 }}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+            <View
+              style={{ flexDirection: "row", alignItems: "center", gap: 12 }}
+            >
               <Avatar uri={operatorAvatar} size={36} />
               <View style={{ flex: 1 }}>
                 <Typo size={14} color={colors.white} fontWeight="800">
                   {operatorDisplayName}
                 </Typo>
                 {operatorLocation?.address && (
-                  <Typo size={11} color={colors.neutral400} style={{ marginTop: 2 }}>
+                  <Typo
+                    size={11}
+                    color={colors.neutral400}
+                    style={{ marginTop: 2 }}
+                  >
                     {operatorLocation.address}
                   </Typo>
                 )}
               </View>
-              <Pressable hitSlop={8} onPress={() => router.push("/(main)/message")}>
+              <Pressable
+                hitSlop={8}
+                onPress={() => router.push("/(main)/message")}
+              >
                 <Icons.EnvelopeSimple size={18} color={colors.neutral300} />
               </Pressable>
             </View>
@@ -330,13 +446,15 @@ export default function TrackActivity() {
               <View style={[styles.dotBig, { backgroundColor: "#3777FF" }]} />
               <View style={styles.rail} />
               {/* Red dot for operator at the bottom */}
-              {operatorUsername && operatorInitialAddress && item.status === "accepted" ? (
+              {operatorUsername &&
+              operatorInitialAddress &&
+              item.status === "accepted" ? (
                 <View style={[styles.dotBig, { backgroundColor: "#FF5454" }]} />
               ) : null}
             </View>
 
             {/* Stops */}
-            <View style={{ flex: 1, justifyContent: 'space-between' }}>
+            <View style={{ flex: 1, justifyContent: "space-between" }}>
               {/* Current location (blue dot) */}
               <View>
                 <Typo size={16} color={colors.white} fontWeight="900">
@@ -350,22 +468,26 @@ export default function TrackActivity() {
               </View>
 
               {/* Operator location (red dot) - at the bottom, aligned with red dot */}
-              {operatorUsername && operatorInitialAddress && item.status === "accepted" && (
-                <View style={{ marginTop: spacingY._40, paddingTop: spacingY._20}}>
-                  <Typo size={16} color={colors.white} fontWeight="900">
-                    {operatorUsername}
-                  </Typo>
-                  <Typo size={12} color={colors.neutral400}>
-                    {operatorInitialAddress}
-                  </Typo>
-                </View>
-              )}
+              {operatorUsername &&
+                operatorInitialAddress &&
+                item.status === "accepted" && (
+                  <View
+                    style={{
+                      marginTop: spacingY._40,
+                      paddingTop: spacingY._20,
+                    }}
+                  >
+                    <Typo size={16} color={colors.white} fontWeight="900">
+                      {operatorUsername}
+                    </Typo>
+                    <Typo size={12} color={colors.neutral400}>
+                      {operatorInitialAddress}
+                    </Typo>
+                  </View>
+                )}
             </View>
           </View>
         </Card>
-
-     
-    
       </View>
     </ScreenWrapper>
   );
@@ -399,6 +521,10 @@ const styles = StyleSheet.create({
     backgroundColor: colors.green,
   },
   dotBig: { width: 12, height: 12, borderRadius: 6 },
-  rail: { width: 2, height: 120, backgroundColor: "#2A2F36", marginVertical: 10 },
- 
+  rail: {
+    width: 2,
+    height: 120,
+    backgroundColor: "#2A2F36",
+    marginVertical: 10,
+  },
 });

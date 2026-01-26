@@ -7,14 +7,13 @@ import { sendResetEmail } from "../utils/sendEmail";
 import type { HydratedDocument } from "mongoose";
 import type { UserProps as IUser } from "../types";
 
-
 function make6DigitPin(): string {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
 export const registerUser = async (
   req: Request,
-  res: Response
+  res: Response,
 ): Promise<void> => {
   const { email, password, name, avatar, phone } = req.body;
 
@@ -104,7 +103,7 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
  */
 export const forgotPassword = async (
   req: Request,
-  res: Response
+  res: Response,
 ): Promise<void> => {
   const { email } = req.body;
   try {
@@ -137,7 +136,7 @@ export const forgotPassword = async (
  */
 export const resetPassword = async (
   req: Request,
-  res: Response
+  res: Response,
 ): Promise<void> => {
   const { token } = req.params;
   const { password } = req.body;
@@ -169,4 +168,3 @@ export const resetPassword = async (
     res.status(500).json({ success: false, msg: "Server Error" });
   }
 };
-

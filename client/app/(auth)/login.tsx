@@ -60,7 +60,9 @@ const Login = () => {
   const [focused, setFocused] = useState<"id" | "pwd" | null>(null);
 
   // Inline errors
-  const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof LoginForm, string>>>({});
+  const [fieldErrors, setFieldErrors] = useState<
+    Partial<Record<keyof LoginForm, string>>
+  >({});
   const [loginError, setLoginError] = useState<string>("");
 
   const router = useRouter();
@@ -141,24 +143,30 @@ const Login = () => {
       setIsSigningIn(false);
     }
   };
-
   // icon colors (light grey when idle, green when focused)
   const idleColor = colors.neutral200;
   const activeColor = colors.green;
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top", "right", "left", "bottom"]}>
+    <SafeAreaView
+      style={styles.safe}
+      edges={["top", "right", "left", "bottom"]}
+    >
       <StatusBar translucent={false} backgroundColor={colors.black} />
       <View style={styles.kav}>
         <View style={styles.content}>
           <View style={styles.form}>
             <View style={{ gap: spacingY._5, marginBottom: spacingY._15 }}>
-              <Typo size={35} style={{ textAlign: "center" }} fontFamily="Candal">
+              <Typo
+                size={35}
+                style={{ textAlign: "center" }}
+                fontFamily="Candal"
+              >
                 <Text style={{ color: colors.green }}>patch</Text>
                 <Text style={{ color: colors.white }}> up</Text>
               </Typo>
               <Typo
-                color={colors.neutral100}                                                                   
+                color={colors.neutral100}
                 style={{ textAlign: "center", marginTop: -spacingY._12 }}
                 fontFamily="InterLight"
               >
@@ -193,7 +201,12 @@ const Login = () => {
               }
             />
             {!!fieldErrors.identifier && (
-              <Typo color={colors.rose} size={16} style={{ marginTop: 4 }} fontFamily="InterLight">
+              <Typo
+                color={colors.rose}
+                size={16}
+                style={{ marginTop: 4 }}
+                fontFamily="InterLight"
+              >
                 {fieldErrors.identifier}
               </Typo>
             )}
@@ -212,7 +225,9 @@ const Login = () => {
               value={passwordInput}
               onChangeText={handlePasswordChange}
               onFocus={() => setFocused("pwd")}
-              onBlur={() => setFocused((prev) => (prev === "pwd" ? null : prev))}
+              onBlur={() =>
+                setFocused((prev) => (prev === "pwd" ? null : prev))
+              }
               icon={
                 <Icons.LockIcon
                   size={verticalScale(26)}
@@ -221,7 +236,12 @@ const Login = () => {
               }
             />
             {!!fieldErrors.password && (
-              <Typo color={colors.rose} size={16} style={{ marginTop: 4 }} fontFamily="InterLight">
+              <Typo
+                color={colors.rose}
+                size={16}
+                style={{ marginTop: 4 }}
+                fontFamily="InterLight"
+              >
                 {fieldErrors.password}
               </Typo>
             )}
@@ -234,10 +254,17 @@ const Login = () => {
                 hitSlop={8}
               >
                 <View
-                  style={[styles.checkbox, rememberMe && styles.checkboxChecked]}
+                  style={[
+                    styles.checkbox,
+                    rememberMe && styles.checkboxChecked,
+                  ]}
                 >
                   {rememberMe && (
-                    <Icons.CheckIcon size={12} color={colors.black} weight="bold" />
+                    <Icons.CheckIcon
+                      size={12}
+                      color={colors.black}
+                      weight="bold"
+                    />
                   )}
                 </View>
                 <Typo
@@ -254,14 +281,22 @@ const Login = () => {
                 onPress={() => router.push("/(auth)/forgot-password")}
                 hitSlop={8}
               >
-                <Typo color={colors.neutral200} size={14} fontFamily="InterLight">
+                <Typo
+                  color={colors.neutral200}
+                  size={14}
+                  fontFamily="InterLight"
+                >
                   Forgot Password?
                 </Typo>
               </Pressable>
             </View>
 
             {!!loginError && (
-              <Typo color={colors.rose} size={13} style={{ marginTop: spacingY._10 }}>
+              <Typo
+                color={colors.rose}
+                size={13}
+                style={{ marginTop: spacingY._10 }}
+              >
                 {loginError}
               </Typo>
             )}
@@ -307,13 +342,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.black,
     paddingHorizontal: spacingX._25,
     paddingBottom: spacingY._60,
-  
   },
   form: {
     flex: 1,
     justifyContent: "center",
     gap: spacingY._15,
-
   },
   rowBetween: {
     flexDirection: "row",

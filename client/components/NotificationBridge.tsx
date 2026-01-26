@@ -21,24 +21,24 @@ import {
 import {
   registerForPushNotificationsAsync,
   showLocalMessageNotification,
+  showLocalAssistNotification,
   ensureNotificationCategories,
 } from "../notifications/notification";
+import { toast } from "./Toast";
 
 import Typo from "@/components/Typo";
 import { colors, radius, spacingX, spacingY } from "@/constants/theme";
-
 
 export default function NotificationBridge() {
   const { user } = useAuth();
   const router = useRouter();
   const appState = useRef<AppStateStatus>(AppState.currentState);
 
-
   // Track foreground/background
   useEffect(() => {
     const sub = AppState.addEventListener(
       "change",
-      (s) => (appState.current = s)
+      (s) => (appState.current = s),
     );
     return () => sub.remove();
   }, []);
@@ -96,7 +96,7 @@ export default function NotificationBridge() {
             participants: JSON.stringify(participants),
           },
         });
-      }
+      },
     );
     return () => sub.remove();
   }, [router]);
@@ -159,6 +159,56 @@ export default function NotificationBridge() {
     };
   }, []);
 
+  // 🔔 Global Assistance Request Monitor
+  // This ensures the user gets notified even if they aren't on the Home/Track screen.
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return;
+
+    const handleAssistStatus = (evt: any) => {
+      if (!evt?.success || !evt?.data) return;
+      const data = evt.data;
+      const status = String(data.status || "").toLowerCase();
+
+      if (status === "accepted") {
+        const title = "Request Accepted! 🎉";
+        const body = data.operator?.name
+          ? `Your request was accepted by ${data.operator.name}!`
+          : "Your assistance request has been approved!";
+
+        toast.success(`${body} 🎉`, { duration: 6000 });
+
+        showLocalAssistNotification({
+          title,
+          body,
+          status,
+          assistId: data.id,
+        });
+      } else if (status === "completed") {
+        const title = "Assistance Completed! ✨";
+        const body = "Your vehicle repair is done. Safe travels!";
+
+        toast.success(body, { duration: 6000 });
+
+        showLocalAssistNotification({
+          title,
+          body,
+          status,
+          assistId: data.id,
+        });
+      }
+    };
+
+    socket.on("assist:approved", handleAssistStatus);
+    socket.on("assist:statusUpdate", handleAssistStatus);
+    socket.on("assist:status", handleAssistStatus);
+
+    return () => {
+      socket.off("assist:approved", handleAssistStatus);
+      socket.off("assist:statusUpdate", handleAssistStatus);
+      socket.off("assist:status", handleAssistStatus);
+    };
+  }, []);
 
   return null;
 }

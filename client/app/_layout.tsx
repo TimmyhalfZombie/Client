@@ -17,6 +17,8 @@ import ErrorBoundary from "@/components/ErrorBoundary";
 import NotificationBridge from "@/components/NotificationBridge";
 // 🆕 Keeps Activity synced for assist events
 import AssistSocketBridge from "@/components/AssistSocketBridge";
+// 🆕 Global toast notifications
+import { ToastProvider } from "@/components/Toast";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -40,26 +42,31 @@ export default function RootLayout() {
           <View style={{ flex: 1 }} onLayout={onLayoutRootView}>
             <AuthProvider>
               <LocationProvider>
-                <NotificationBridge />
-                <AssistSocketBridge />
-              <Stack
-                screenOptions={{
-                  headerShown: false,
-                  animation: "fade_from_bottom",
-                  contentStyle: { backgroundColor: colors.black },
-                }}
-              >
-                <Stack.Screen
-                  name="patching"
-                  options={{
-                    headerShown: false,
-                    presentation: "fullScreenModal",
-                    animation: "none",
-                    gestureEnabled: false,
-                  }}
-                />
-                <Stack.Screen name="(main)" options={{ headerShown: false }} />
-              </Stack>
+                <ToastProvider>
+                  <NotificationBridge />
+                  <AssistSocketBridge />
+                  <Stack
+                    screenOptions={{
+                      headerShown: false,
+                      animation: "fade_from_bottom",
+                      contentStyle: { backgroundColor: colors.black },
+                    }}
+                  >
+                    <Stack.Screen
+                      name="patching"
+                      options={{
+                        headerShown: false,
+                        presentation: "fullScreenModal",
+                        animation: "none",
+                        gestureEnabled: false,
+                      }}
+                    />
+                    <Stack.Screen
+                      name="(main)"
+                      options={{ headerShown: false }}
+                    />
+                  </Stack>
+                </ToastProvider>
               </LocationProvider>
             </AuthProvider>
           </View>

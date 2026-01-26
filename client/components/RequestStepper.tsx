@@ -12,6 +12,7 @@ import {
   Modal,
   Pressable,
   FlatList,
+  PanResponder,
 } from "react-native";
 import Typo from "@/components/Typo";
 import * as Icons from "phosphor-react-native";
@@ -24,9 +25,10 @@ type Props = {
   otherInfo: string;
   setOtherInfo: (v: string) => void;
   onRecenter: () => void;
-  bottomInset?: number;
-  onRequest?: (payload: { model: string; plate: string; info: string }) => void;
-  isRequesting?: boolean;
+  bottomInset: number;
+  onRequest: () => void;
+  isRequesting: boolean;
+  requestStatus?: "idle" | "requesting" | "accepted";
 };
 
 const COOLDOWN_MS = 30_000;
@@ -41,14 +43,53 @@ const AnimatedTouchable = Animated.createAnimatedComponent(TouchableOpacity);
 
 /* ----------------------------- PH Moto Catalog ---------------------------- */
 const MOTORCYCLES: Record<string, string[]> = {
-  Honda: ["ADV 160","Airblade 160","BeAT","CB150X","CBR150R","Click 125i","CRF150L","CRF300L","PCX160","TMX125 Alpha","XRM125"],
-  Yamaha: ["Aerox 155","FZi 150","Mio Gear","Mio i 125","Mio Soul i","MT-15","NMAX 155","Sniper 155","XSR155","YZF-R15M"],
-  Suzuki: ["Avenis","Burgman Street","Gixxer 150","Raider R150 Fi","Skydrive Sport","Smash 115","V-Strom 250SX"],
-  Kawasaki: ["Barako II","Dominar 400","KLX 150","Ninja 400","Rouser NS160","Rouser RS200","W175"],
-  Kymco: ["KRV 180i TCS","Like 125","Super 8","X-Town 300i"],
-  TVS: ["Apache RTR 200 4V","Dazz Prime","Rockz 125"],
-  SYM: ["Husky 150","Jet 14","NHX 125"],
-  Keeway: ["RKS 150 Sport","Superlight 200"],
+  Honda: [
+    "ADV 160",
+    "Airblade 160",
+    "BeAT",
+    "CB150X",
+    "CBR150R",
+    "Click 125i",
+    "CRF150L",
+    "CRF300L",
+    "PCX160",
+    "TMX125 Alpha",
+    "XRM125",
+  ],
+  Yamaha: [
+    "Aerox 155",
+    "FZi 150",
+    "Mio Gear",
+    "Mio i 125",
+    "Mio Soul i",
+    "MT-15",
+    "NMAX 155",
+    "Sniper 155",
+    "XSR155",
+    "YZF-R15M",
+  ],
+  Suzuki: [
+    "Avenis",
+    "Burgman Street",
+    "Gixxer 150",
+    "Raider R150 Fi",
+    "Skydrive Sport",
+    "Smash 115",
+    "V-Strom 250SX",
+  ],
+  Kawasaki: [
+    "Barako II",
+    "Dominar 400",
+    "KLX 150",
+    "Ninja 400",
+    "Rouser NS160",
+    "Rouser RS200",
+    "W175",
+  ],
+  Kymco: ["KRV 180i TCS", "Like 125", "Super 8", "X-Town 300i"],
+  TVS: ["Apache RTR 200 4V", "Dazz Prime", "Rockz 125"],
+  SYM: ["Husky 150", "Jet 14", "NHX 125"],
+  Keeway: ["RKS 150 Sport", "Superlight 200"],
 };
 
 // ✅ Allowed: NON-TUBELESS? No — these are tube-type models only.
@@ -78,8 +119,17 @@ const PLATE_PRESETS = [
 
 // Other presets (user can also type freely)
 const OTHER_PRESETS = [
-  "Black","Blue","Delivery box","Gray","Matte Black","Red","White",
-  "With crash guard","With side bags","With top box","With windshield",
+  "Black",
+  "Blue",
+  "Delivery box",
+  "Gray",
+  "Matte Black",
+  "Red",
+  "White",
+  "With crash guard",
+  "With side bags",
+  "With top box",
+  "With windshield",
 ].sort((a, b) => a.localeCompare(b));
 
 const DARK = "#1111118e";
@@ -93,12 +143,16 @@ const ITEM_PRESSED = "#e6e6e6a2";
 const BACKDROP = "rgba(0,0,0,0.20)";
 
 const RequestStepper: React.FC<Props> = ({
-  vehicleModel, setVehicleModel,
-  plateNumber, setPlateNumber,
-  otherInfo, setOtherInfo,
-  bottomInset = 110,
+  vehicleModel,
+  setVehicleModel,
+  plateNumber,
+  setPlateNumber,
+  otherInfo,
+  setOtherInfo,
+  bottomInset,
   onRequest,
-  isRequesting = false,
+  isRequesting,
+  requestStatus = "idle",
 }) => {
   const [step, setStep] = useState<Step>(0);
   const [openMenu, setOpenMenu] = useState<FieldKey | null>(null);
@@ -107,6 +161,9 @@ const RequestStepper: React.FC<Props> = ({
   const [vehicleQuery, setVehicleQuery] = useState(vehicleModel);
   const [plateQuery, setPlateQuery] = useState(plateNumber);
   const [otherQuery, setOtherQuery] = useState(otherInfo);
+  const [isCollapsed, setIsCollapsed] = useState(false);
+  const collapseTranslateY = useRef(new Animated.Value(0)).current;
+  const [cardHeight, setCardHeight] = useState(0);
 
   const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
   const [nowTick, setNowTick] = useState<number>(Date.now());
@@ -140,51 +197,83 @@ const RequestStepper: React.FC<Props> = ({
   const mm = String(Math.floor(secondsLeft / 60)).padStart(2, "0");
   const ss = String(secondsLeft % 60).padStart(2, "0");
 
-  useEffect(() => { if (cooldownUntil && msLeft <= 0) setCooldownUntil(null); }, [msLeft, cooldownUntil]);
+  useEffect(() => {
+    if (cooldownUntil && msLeft <= 0) setCooldownUntil(null);
+  }, [msLeft, cooldownUntil]);
 
   /* --------------------------- Keyboard lifting -------------------------- */
   useEffect(() => {
     if (Platform.OS === "ios") {
       const onShow = (e: any) => {
-        const h = Math.max(0, (e?.endCoordinates?.height ?? 0) * KB_LIFT_FACTOR_IOS - KB_SAFE_GAP);
-        Animated.timing(sheetTranslateY, { toValue: -h, duration: e?.duration ?? 250, useNativeDriver: true }).start();
+        const h = Math.max(
+          0,
+          (e?.endCoordinates?.height ?? 0) * KB_LIFT_FACTOR_IOS - KB_SAFE_GAP,
+        );
+        Animated.timing(sheetTranslateY, {
+          toValue: -h,
+          duration: e?.duration ?? 250,
+          useNativeDriver: true,
+        }).start();
       };
       const onHide = (e?: any) => {
-        Animated.timing(sheetTranslateY, { toValue: 0, duration: e?.duration ?? 200, useNativeDriver: true }).start();
+        Animated.timing(sheetTranslateY, {
+          toValue: 0,
+          duration: e?.duration ?? 200,
+          useNativeDriver: true,
+        }).start();
       };
       const s1 = Keyboard.addListener("keyboardWillShow", onShow);
       const s2 = Keyboard.addListener("keyboardWillHide", onHide);
-      return () => { s1.remove(); s2.remove(); };
+      return () => {
+        s1.remove();
+        s2.remove();
+      };
     } else {
       const onShow = (e: any) => {
-        const lift = Math.max(0, Math.round((e?.endCoordinates?.height ?? 0) * KB_LIFT_FACTOR_ANDROID) - KB_SAFE_GAP);
+        const lift = Math.max(
+          0,
+          Math.round(
+            (e?.endCoordinates?.height ?? 0) * KB_LIFT_FACTOR_ANDROID,
+          ) - KB_SAFE_GAP,
+        );
         setAndroidKbLift(lift);
       };
       const onHide = () => setAndroidKbLift(0);
       const s1 = Keyboard.addListener("keyboardDidShow", onShow);
       const s2 = Keyboard.addListener("keyboardDidHide", onHide);
-      return () => { s1.remove(); s2.remove(); };
+      return () => {
+        s1.remove();
+        s2.remove();
+      };
     }
   }, [sheetTranslateY]);
 
   // Dropdown lift (modals)
   useEffect(() => {
-    const showEvt = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
-    const hideEvt = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
-    const onShow = (e: any) => setDropdownKbLift(e?.endCoordinates?.height ?? 0);
+    const showEvt =
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvt =
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const onShow = (e: any) =>
+      setDropdownKbLift(e?.endCoordinates?.height ?? 0);
     const onHide = () => setDropdownKbLift(0);
     const s1 = Keyboard.addListener(showEvt, onShow);
     const s2 = Keyboard.addListener(hideEvt, onHide);
-    return () => { s1.remove(); s2.remove(); };
+    return () => {
+      s1.remove();
+      s2.remove();
+    };
   }, []);
 
   /* ------------------------------- Buttons ------------------------------- */
   const isAllowedVehicle = useMemo(
     () => ALLOWED_VEHICLES.has((vehicleModel || "").trim()),
-    [vehicleModel]
+    [vehicleModel],
   );
 
-  const allFilled = !!vehicleModel.trim() && !!plateNumber.trim() && !!otherInfo.trim();
+  const allFilled =
+    !!vehicleModel.trim() && !!plateNumber.trim() && !!otherInfo.trim();
+  const isAccepted = requestStatus === "accepted";
   const onFinalStep = step === 3;
 
   const nextDisabled =
@@ -192,29 +281,75 @@ const RequestStepper: React.FC<Props> = ({
     (step === 1 && !plateNumber.trim()) ||
     (step === 2 && !otherInfo.trim());
 
-  const buttonDisabled = (onFinalStep ? !allFilled : nextDisabled) || isRequesting || cooldownActive;
+  const buttonDisabled =
+    (onFinalStep ? !allFilled : nextDisabled) ||
+    isRequesting ||
+    cooldownActive ||
+    isAccepted;
   const buttonText = isRequesting
     ? "Requesting..."
-    : cooldownActive
-    ? `Please wait ${mm}:${ss}`
-    : onFinalStep
-    ? "Submit"
-    : "Next";
+    : isAccepted
+      ? "Accepted!"
+      : cooldownActive
+        ? `Please wait ${mm}:${ss}`
+        : onFinalStep
+          ? "Submit"
+          : "Next";
 
   useEffect(() => {
-    Animated.timing(btnOpacity, { toValue: buttonDisabled ? 0.5 : 1, duration: 180, useNativeDriver: true }).start();
+    Animated.timing(btnOpacity, {
+      toValue: buttonDisabled ? 0.5 : 1,
+      duration: 180,
+      useNativeDriver: true,
+    }).start();
   }, [buttonDisabled]);
 
   const baseMenuBottom = (bottomInset ?? 110) + 8;
   const menuBottom = baseMenuBottom + dropdownKbLift;
 
+  /* -------------------------- Collapse Logic --------------------------- */
+  const HEADER_HEIGHT = 55; // Approximate height of the title area
+
+  const toggleCollapse = () => {
+    const nextIsCollapsed = !isCollapsed;
+    const nextValue = nextIsCollapsed
+      ? Math.max(0, cardHeight - HEADER_HEIGHT)
+      : 0;
+
+    Animated.spring(collapseTranslateY, {
+      toValue: nextValue,
+      useNativeDriver: true,
+      friction: 8,
+      tension: 40,
+    }).start();
+    setIsCollapsed(nextIsCollapsed);
+  };
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        // Only trigger if vertical swipe is significant
+        return Math.abs(gestureState.dy) > 10;
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 50) {
+          // Swipe down -> collapse
+          if (!isCollapsed) toggleCollapse();
+        } else if (gestureState.dy < -50) {
+          // Swipe up -> expand
+          if (isCollapsed) toggleCollapse();
+        }
+      },
+    }),
+  ).current;
+
   /* ------------------------------ Handlers ------------------------------- */
   const handleNext = () => {
     if (onFinalStep) {
       if (buttonDisabled) return;
-      onRequest?.({ model: vehicleModel.trim(), plate: plateNumber.trim(), info: otherInfo.trim() });
+      onRequest?.();
     } else if (!nextDisabled) {
-      setStep((s) => ((s + 1) as Step));
+      setStep((s) => (s + 1) as Step);
     }
   };
   const handlePrev = () => setStep((s) => (s > 0 ? ((s - 1) as Step) : s));
@@ -232,14 +367,16 @@ const RequestStepper: React.FC<Props> = ({
 
   const plateOptions = useMemo(
     () => [...PLATE_PRESETS].sort((a, b) => a.localeCompare(b)),
-    []
+    [],
   );
   const otherOptions = useMemo(
     () => [...OTHER_PRESETS].sort((a, b) => a.localeCompare(b)),
-    []
+    [],
   );
 
-  const StepTitle = ["Vehicle model", "Plate number", "Other info", "Review"][step];
+  const StepTitle = ["Vehicle model", "Plate number", "Other info", "Review"][
+    step
+  ];
 
   const renderField = () => {
     if (step === 3) return null;
@@ -249,9 +386,11 @@ const RequestStepper: React.FC<Props> = ({
     const isOther = step === 2;
 
     const placeholder =
-      step === 0 ? "Brand & model, e.g., Honda XRM125" :
-      step === 1 ? "Type or select (e.g., ABC123 / No plate)" :
-      "Type or select (e.g., Black / With top box)";
+      step === 0
+        ? "Brand & model, e.g., Honda XRM125"
+        : step === 1
+          ? "Type or select (e.g., ABC123 / No plate)"
+          : "Type or select (e.g., Black / With top box)";
 
     return (
       <View style={styles.comboWrap}>
@@ -259,11 +398,22 @@ const RequestStepper: React.FC<Props> = ({
           style={styles.comboInput}
           placeholder={placeholder}
           placeholderTextColor="#6B7280"
-          value={ step === 0 ? vehicleModel : step === 1 ? plateNumber : otherInfo }
+          value={
+            step === 0 ? vehicleModel : step === 1 ? plateNumber : otherInfo
+          }
           onChangeText={(t) => {
-            if (isVehicle) { setVehicleModel(t); setVehicleQuery(t); }
-            if (isPlate)   { setPlateNumber(t); setPlateQuery(t); }
-            if (isOther)   { setOtherInfo(t); setOtherQuery(t); }
+            if (isVehicle) {
+              setVehicleModel(t);
+              setVehicleQuery(t);
+            }
+            if (isPlate) {
+              setPlateNumber(t);
+              setPlateQuery(t);
+            }
+            if (isOther) {
+              setOtherInfo(t);
+              setOtherQuery(t);
+            }
           }}
           editable
           autoCapitalize={isPlate ? "characters" : "sentences"}
@@ -271,7 +421,9 @@ const RequestStepper: React.FC<Props> = ({
         />
         <TouchableOpacity
           style={styles.comboCaret}
-          onPress={() => setOpenMenu(step === 0 ? "vehicle" : step === 1 ? "plate" : "other")}
+          onPress={() =>
+            setOpenMenu(step === 0 ? "vehicle" : step === 1 ? "plate" : "other")
+          }
         >
           <Icons.CaretDown size={16} color="#111827" weight="bold" />
         </TouchableOpacity>
@@ -290,7 +442,10 @@ const RequestStepper: React.FC<Props> = ({
     );
   };
 
-  const closeMenus = () => { setOpenMenu(null); Keyboard.dismiss(); };
+  const closeMenus = () => {
+    setOpenMenu(null);
+    Keyboard.dismiss();
+  };
 
   // For "Use" button enable/disable in vehicle modal
   const typedVehicle = (vehicleQuery || "").trim();
@@ -298,31 +453,79 @@ const RequestStepper: React.FC<Props> = ({
 
   return (
     <View style={styles.container} pointerEvents="box-none">
-      {!!openMenu && <TouchableOpacity activeOpacity={1} onPress={closeMenus} style={styles.touchCatcher} />}
+      {!!openMenu && (
+        <TouchableOpacity
+          activeOpacity={1}
+          onPress={closeMenus}
+          style={styles.touchCatcher}
+        />
+      )}
 
       <Animated.View
         style={[
           styles.sheet,
           {
-            marginBottom: bottomInset + (Platform.OS === "android" ? androidKbLift : 0),
-            transform: Platform.OS === "ios" ? [{ translateY: sheetTranslateY }] : undefined,
+            marginBottom:
+              bottomInset + (Platform.OS === "android" ? androidKbLift : 0),
+            transform: [
+              ...(Platform.OS === "ios"
+                ? [{ translateY: sheetTranslateY }]
+                : []),
+              { translateY: collapseTranslateY },
+            ],
           },
         ]}
         pointerEvents="box-none"
       >
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-          <View style={styles.card} pointerEvents="auto">
-            <Typo size={18} color="#fff" fontFamily="InterLight" fontWeight={800} style={{ marginBottom: 6 }}>
-              Request assistance
-            </Typo>
+          <View
+            style={styles.card}
+            pointerEvents="auto"
+            {...panResponder.panHandlers}
+            onLayout={(e) => setCardHeight(e.nativeEvent.layout.height)}
+          >
+            <View style={styles.headerRowMain}>
+              <Typo
+                size={18}
+                color="#fff"
+                fontFamily="InterLight"
+                fontWeight={800}
+                style={{ textAlign: "center", flex: 1 }}
+              >
+                Request assistance
+              </Typo>
+              <TouchableOpacity
+                onPress={toggleCollapse}
+                style={styles.collapseBtn}
+                hitSlop={15}
+              >
+                {isCollapsed ? (
+                  <Icons.CaretUp size={24} color="#fff" weight="bold" />
+                ) : (
+                  <Icons.CaretDown size={24} color="#fff" weight="bold" />
+                )}
+              </TouchableOpacity>
+            </View>
 
             {/* Friendlier, clearer subheading */}
-            <Typo size={13} color="#ffffffcc" fontFamily="InterLight" style={{ marginBottom: 10 }}>
-              Please note: we currently accept motorcycles with tube-type tires only (no tubeless).
+            <Typo
+              size={13}
+              color="#ffffffcc"
+              fontFamily="InterLight"
+              style={{ marginBottom: 10 }}
+            >
+              Please note: we currently accept motorcycles with tube-type tires
+              only (no tubeless).
             </Typo>
 
             <View style={styles.innerPanel}>
-              <Typo size={16} color="#000000ff" fontFamily="InterLight" fontWeight="600" style={{ marginBottom: 8 }}>
+              <Typo
+                size={16}
+                color="#000000ff"
+                fontFamily="InterLight"
+                fontWeight="600"
+                style={{ marginBottom: 8 }}
+              >
                 {StepTitle}
               </Typo>
 
@@ -330,13 +533,34 @@ const RequestStepper: React.FC<Props> = ({
               {renderReview()}
 
               <View style={styles.navRow}>
-                <TouchableOpacity style={[styles.navBtn, step === 0 && styles.navDisabled]} disabled={step === 0} onPress={handlePrev}>
+                <TouchableOpacity
+                  style={[styles.navBtn, step === 0 && styles.navDisabled]}
+                  disabled={step === 0}
+                  onPress={handlePrev}
+                >
                   <Icons.CaretLeft size={16} color="#0D0D0D" />
-                  <Typo size={14} color="#0D0D0D" fontFamily="InterLight" fontWeight="900">Prev</Typo>
+                  <Typo
+                    size={14}
+                    color="#0D0D0D"
+                    fontFamily="InterLight"
+                    fontWeight="900"
+                  >
+                    Prev
+                  </Typo>
                 </TouchableOpacity>
 
-                <AnimatedTouchable style={[styles.navBtn, { opacity: btnOpacity }]} activeOpacity={0.9} onPress={handleNext} disabled={buttonDisabled}>
-                  <Typo size={14} color="#0D0D0D" fontFamily="InterLight" fontWeight="900">
+                <AnimatedTouchable
+                  style={[styles.navBtn, { opacity: btnOpacity }]}
+                  activeOpacity={0.9}
+                  onPress={handleNext}
+                  disabled={buttonDisabled}
+                >
+                  <Typo
+                    size={14}
+                    color="#0D0D0D"
+                    fontFamily="InterLight"
+                    fontWeight="900"
+                  >
                     {buttonText}
                   </Typo>
                   {step !== 3 && <Icons.CaretRight size={16} color="#0D0D0D" />}
@@ -348,10 +572,21 @@ const RequestStepper: React.FC<Props> = ({
       </Animated.View>
 
       {/* VEHICLE PICKER (minimal) */}
-      <Modal visible={openMenu === "vehicle"} transparent animationType="fade" onRequestClose={closeMenus}>
+      <Modal
+        visible={openMenu === "vehicle"}
+        transparent
+        animationType="fade"
+        onRequestClose={closeMenus}
+      >
         <Pressable style={styles.modalBackdrop} onPress={closeMenus}>
           <View style={[styles.menu, { bottom: menuBottom }]}>
-            <Typo size={12} color={MENU_TEXT} fontFamily="InterLight" fontWeight="600" style={styles.menuTitle}>
+            <Typo
+              size={12}
+              color={MENU_TEXT}
+              fontFamily="InterLight"
+              fontWeight="600"
+              style={styles.menuTitle}
+            >
               Select vehicle model
             </Typo>
 
@@ -367,9 +602,17 @@ const RequestStepper: React.FC<Props> = ({
               />
               <TouchableOpacity
                 disabled={!canUseTypedVehicle}
-                onPress={() => { setVehicleModel(typedVehicle); closeMenus(); }}
+                onPress={() => {
+                  setVehicleModel(typedVehicle);
+                  closeMenus();
+                }}
               >
-                <Typo size={12} color={canUseTypedVehicle ? "#10B981" : "#9CA3AF"} fontFamily="InterLight" fontWeight="800">
+                <Typo
+                  size={12}
+                  color={canUseTypedVehicle ? "#10B981" : "#9CA3AF"}
+                  fontFamily="InterLight"
+                  fontWeight="800"
+                >
                   Use
                 </Typo>
               </TouchableOpacity>
@@ -382,10 +625,19 @@ const RequestStepper: React.FC<Props> = ({
               ItemSeparatorComponent={() => <View style={styles.sep} />}
               renderItem={({ item }) => (
                 <Pressable
-                  onPress={() => { setVehicleModel(item); setVehicleQuery(item); closeMenus(); }}
-                  style={({ pressed }) => [styles.menuItem, pressed && { backgroundColor: ITEM_PRESSED }]}
+                  onPress={() => {
+                    setVehicleModel(item);
+                    setVehicleQuery(item);
+                    closeMenus();
+                  }}
+                  style={({ pressed }) => [
+                    styles.menuItem,
+                    pressed && { backgroundColor: ITEM_PRESSED },
+                  ]}
                 >
-                  <Typo size={14} color={MENU_TEXT} fontFamily="InterLight">{item}</Typo>
+                  <Typo size={14} color={MENU_TEXT} fontFamily="InterLight">
+                    {item}
+                  </Typo>
                 </Pressable>
               )}
               style={{ maxHeight: 280 }}
@@ -395,10 +647,21 @@ const RequestStepper: React.FC<Props> = ({
       </Modal>
 
       {/* PLATE PICKER */}
-      <Modal visible={openMenu === "plate"} transparent animationType="fade" onRequestClose={closeMenus}>
+      <Modal
+        visible={openMenu === "plate"}
+        transparent
+        animationType="fade"
+        onRequestClose={closeMenus}
+      >
         <Pressable style={styles.modalBackdrop} onPress={closeMenus}>
           <View style={[styles.menu, { bottom: menuBottom }]}>
-            <Typo size={12} color={MENU_TEXT} fontFamily="InterLight" fontWeight="600" style={styles.menuTitle}>
+            <Typo
+              size={12}
+              color={MENU_TEXT}
+              fontFamily="InterLight"
+              fontWeight="600"
+              style={styles.menuTitle}
+            >
               Plate number
             </Typo>
 
@@ -408,10 +671,19 @@ const RequestStepper: React.FC<Props> = ({
               ItemSeparatorComponent={() => <View style={styles.sep} />}
               renderItem={({ item }) => (
                 <Pressable
-                  style={({ pressed }) => [styles.menuItem, pressed && { backgroundColor: ITEM_PRESSED }]}
-                  onPress={() => { setPlateNumber(item); setPlateQuery(item); closeMenus(); }}
+                  style={({ pressed }) => [
+                    styles.menuItem,
+                    pressed && { backgroundColor: ITEM_PRESSED },
+                  ]}
+                  onPress={() => {
+                    setPlateNumber(item);
+                    setPlateQuery(item);
+                    closeMenus();
+                  }}
                 >
-                  <Typo size={14} color={MENU_TEXT} fontFamily="InterLight">{item}</Typo>
+                  <Typo size={14} color={MENU_TEXT} fontFamily="InterLight">
+                    {item}
+                  </Typo>
                 </Pressable>
               )}
             />
@@ -420,10 +692,21 @@ const RequestStepper: React.FC<Props> = ({
       </Modal>
 
       {/* OTHER PICKER */}
-      <Modal visible={openMenu === "other"} transparent animationType="fade" onRequestClose={closeMenus}>
+      <Modal
+        visible={openMenu === "other"}
+        transparent
+        animationType="fade"
+        onRequestClose={closeMenus}
+      >
         <Pressable style={styles.modalBackdrop} onPress={closeMenus}>
           <View style={[styles.menu, { bottom: menuBottom }]}>
-            <Typo size={12} color={MENU_TEXT} fontFamily="InterLight" fontWeight="600" style={styles.menuTitle}>
+            <Typo
+              size={12}
+              color={MENU_TEXT}
+              fontFamily="InterLight"
+              fontWeight="600"
+              style={styles.menuTitle}
+            >
               Other info
             </Typo>
 
@@ -433,10 +716,19 @@ const RequestStepper: React.FC<Props> = ({
               ItemSeparatorComponent={() => <View style={styles.sep} />}
               renderItem={({ item }) => (
                 <Pressable
-                  style={({ pressed }) => [styles.menuItem, pressed && { backgroundColor: ITEM_PRESSED }]}
-                  onPress={() => { setOtherInfo(item); setOtherQuery(item); closeMenus(); }}
+                  style={({ pressed }) => [
+                    styles.menuItem,
+                    pressed && { backgroundColor: ITEM_PRESSED },
+                  ]}
+                  onPress={() => {
+                    setOtherInfo(item);
+                    setOtherQuery(item);
+                    closeMenus();
+                  }}
                 >
-                  <Typo size={14} color={MENU_TEXT} fontFamily="InterLight">{item}</Typo>
+                  <Typo size={14} color={MENU_TEXT} fontFamily="InterLight">
+                    {item}
+                  </Typo>
                 </Pressable>
               )}
             />
@@ -450,12 +742,26 @@ const RequestStepper: React.FC<Props> = ({
 export default RequestStepper;
 
 /* --------------------------------- Helpers -------------------------------- */
-const Row = ({ label, value, onEdit }: { label: string; value?: string; onEdit?: () => void }) => (
+const Row = ({
+  label,
+  value,
+  onEdit,
+}: {
+  label: string;
+  value?: string;
+  onEdit?: () => void;
+}) => (
   <View style={styles.reviewRow}>
-    <Typo size={14} color="#000000ff" fontFamily="InterLight" fontWeight="600">{label}</Typo>
+    <Typo size={14} color="#000000ff" fontFamily="InterLight" fontWeight="600">
+      {label}
+    </Typo>
     <View style={styles.reviewValueWrap}>
-      <Typo size={14} color="#000000ff" fontFamily="InterLight">{value || "—"}</Typo>
-      <Pressable onPress={onEdit} hitSlop={8}><Icons.PencilSimple size={14} color="#000000ff" /></Pressable>
+      <Typo size={14} color="#000000ff" fontFamily="InterLight">
+        {value || "—"}
+      </Typo>
+      <Pressable onPress={onEdit} hitSlop={8}>
+        <Icons.PencilSimple size={14} color="#000000ff" />
+      </Pressable>
     </View>
   </View>
 );
@@ -463,11 +769,17 @@ const Row = ({ label, value, onEdit }: { label: string; value?: string; onEdit?:
 /* ---------------------------------- Styles -------------------------------- */
 const styles = StyleSheet.create({
   container: { ...StyleSheet.absoluteFillObject, zIndex: 16 },
-  touchCatcher: { ...StyleSheet.absoluteFillObject, zIndex: 17, backgroundColor: "transparent" },
+  touchCatcher: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 17,
+    backgroundColor: "transparent",
+  },
 
   sheet: {
     position: "absolute",
-    bottom: 0, left: 0, right: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
     backgroundColor: "transparent",
     zIndex: 18,
   },
@@ -485,21 +797,38 @@ const styles = StyleSheet.create({
     marginHorizontal: 0,
     marginBottom: -10,
   },
+  headerRowMain: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 6,
+    position: "relative",
+  },
+  collapseBtn: {
+    position: "absolute",
+    right: 0,
+    padding: 4,
+  },
 
   innerPanel: {
-    borderWidth: 1, borderColor: "#1f2328",
-    borderRadius: 12, padding: 14,
+    borderWidth: 1,
+    borderColor: "#1f2328",
+    borderRadius: 12,
+    padding: 14,
     backgroundColor: "#C0FFCB",
   },
 
   // INPUT WRAP
   comboWrap: {
-    flexDirection: "row", alignItems: "center",
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: "#FFFFFF",
     borderRadius: 12,
     borderWidth: 1,
     borderColor: "#2F2F33",
-    paddingHorizontal: 12, paddingVertical: 8, marginTop: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginTop: 6,
   },
 
   // INPUT
@@ -516,15 +845,38 @@ const styles = StyleSheet.create({
   },
   comboCaret: { padding: 4, marginLeft: 6 },
 
-  navRow: { flexDirection: "row", justifyContent: "space-between", gap: 10, marginTop: 12 },
+  navRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 10,
+    marginTop: 12,
+  },
   navBtn: {
-    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: 6, backgroundColor: "#6EFF87", borderRadius: 12, paddingVertical: 14, borderWidth: 0.5, borderColor: "#000",
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    backgroundColor: "#6EFF87",
+    borderRadius: 12,
+    paddingVertical: 14,
+    borderWidth: 0.5,
+    borderColor: "#000",
   },
   navDisabled: { opacity: 0.45 },
 
-  reviewBox: { marginTop: 4, padding: 12, backgroundColor: "#ffffffff", borderRadius: 8 },
-  reviewRow: { marginTop: 10, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  reviewBox: {
+    marginTop: 4,
+    padding: 12,
+    backgroundColor: "#ffffffff",
+    borderRadius: 8,
+  },
+  reviewRow: {
+    marginTop: 10,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
   reviewValueWrap: { flexDirection: "row", alignItems: "center", gap: 8 },
 
   // Minimal modal backdrop
@@ -532,13 +884,17 @@ const styles = StyleSheet.create({
 
   // Minimal dropdown menu
   menu: {
-    position: "absolute", left: 10, right: 10,
+    position: "absolute",
+    left: 10,
+    right: 10,
     backgroundColor: MENU_BG,
-    borderRadius: 12, padding: 8,
-    borderWidth: StyleSheet.hairlineWidth, borderColor: MENU_BORDER,
+    borderRadius: 12,
+    padding: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: MENU_BORDER,
     elevation: 6,
     shadowColor: "#000",
-    shadowOpacity: 0.10,
+    shadowOpacity: 0.1,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 6 },
   },
@@ -563,11 +919,16 @@ const styles = StyleSheet.create({
 
   // Minimal search (vehicle menu)
   searchWrap: {
-    flexDirection: "row", alignItems: "center", gap: 8,
-    borderWidth: StyleSheet.hairlineWidth, borderColor: MENU_BORDER,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: MENU_BORDER,
     backgroundColor: "#5f5f5f1f",
     borderRadius: 10,
-    paddingHorizontal: 10, paddingVertical: 8, marginBottom: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginBottom: 8,
   },
   searchInput: {
     flex: 1,

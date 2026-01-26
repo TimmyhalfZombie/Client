@@ -7,7 +7,10 @@ import {
   ToastAndroid,
   Alert,
   LogBox,
+  TouchableOpacity,
 } from "react-native";
+import * as Haptics from "expo-haptics";
+import * as Icons from "phosphor-react-native";
 import { useAuth } from "@/contexts/authContext";
 import * as Clipboard from "expo-clipboard";
 import Logger from "@maplibre/maplibre-react-native";
@@ -47,8 +50,14 @@ import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { API_URL } from "@/constants";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import EnRouteManager from "@/components/EnRouteManager";
-import { type OperatorStatusState, type OperatorInfo, type OperatorStatusKind } from "@/types";
+import { toast } from "@/components/Toast";
+import Typo from "@/components/Typo";
+import { colors } from "@/constants/theme";
+import {
+  type OperatorStatusState,
+  type OperatorInfo,
+  type OperatorStatusKind,
+} from "@/types";
 
 /* ---------- DEV: silence MapLibre spam EARLY (before first render) ---------- */
 if (__DEV__) {
@@ -67,7 +76,7 @@ if (__DEV__) {
           a.includes("Request failed due to a permanent error: Canceled") ||
           a.includes("MapLibre error") ||
           a.includes("Failed to load tile") ||
-          a.includes("{TextureViewRend}[Style]"))
+          a.includes("{TextureViewRend}[Style]")),
     );
   const __orig = {
     log: console.log,
@@ -133,6 +142,8 @@ const Home = () => {
     visible: boolean;
     kind: "requesting" | "accepted" | "completed";
     caption?: string;
+    operatorName?: string;
+    operatorAvatar?: string | null;
   }>({
     visible: false,
     kind: "requesting",
@@ -140,21 +151,31 @@ const Home = () => {
   });
 
   // Request status for RequestStepper (kept for compatibility/hooks)
-  const [requestStatus, setRequestStatus] = useState<"idle" | "requesting" | "accepted">("idle");
+  const [requestStatus, setRequestStatus] = useState<
+    "idle" | "requesting" | "accepted"
+  >("idle");
   const [isRequesting, setIsRequesting] = useState(false);
 
   // local refs to correlate ack/approval
   const pendingLocalIdRef = useRef<string | null>(null);
-  const serverAssistIdRef = useRef<string | null>(null);
+  const [serverAssistId, setServerAssistId] = useState<string | null>(null);
 
-  // 🔔 Operator status for card that replaces the stepper
-  const [operatorStatus, setOperatorStatus] = useState<OperatorStatusState>({
-    visible: false,
-    assistId: null,
-    status: "en_route",
-    eta: undefined,
-    operator: undefined,
-  });
+  const getPHTimeWindow = (minutesToAdd = 15) => {
+    const now = new Date();
+    const formatTime = (date: Date) => {
+      return date.toLocaleTimeString("en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+        timeZone: "Asia/Manila",
+      });
+    };
+    const start = formatTime(new Date(now.getTime() + 2 * 60 * 1000));
+    const end = formatTime(
+      new Date(now.getTime() + (minutesToAdd + 2) * 60 * 1000),
+    );
+    return `${start} - ${end}`;
+  };
 
   // Try to disable MapLibre bridge logs as well
   useEffect(() => {
@@ -184,7 +205,7 @@ const Home = () => {
         if (Platform.OS === "android")
           ToastAndroid.show(
             "MapTiler unreachable — using OSM fallback",
-            ToastAndroid.LONG
+            ToastAndroid.LONG,
           );
         else
           Alert.alert("Map tiles", "MapTiler unreachable — using OSM fallback");
@@ -216,7 +237,7 @@ const Home = () => {
   };
 
   /** =======================
-   *  REQUEST ASSIST FLOW
+   *  `REQUEST A`SSIST FLOW
    *  ======================= */
   const onRequestAssist = async () => {
     if (!currentUser) {
@@ -253,7 +274,11 @@ const Home = () => {
 
     // 3) Emit enhanced payload with all customer data
     const payload = {
-      vehicle: { model: vehicleModel.trim(), plate: plateNumber.trim(), notes: otherInfo.trim() },
+      vehicle: {
+        model: vehicleModel.trim(),
+        plate: plateNumber.trim(),
+        notes: otherInfo.trim(),
+      },
       location: { lat: fix[1], lng: fix[0], address: address || "" },
       requestDate: new Date().toISOString(),
       customerName: currentUser?.name || "",
@@ -263,13 +288,14 @@ const Home = () => {
     // 4) Send and capture ack
     assistCreate(payload, async (ack) => {
       if (ack?.success && ack?.data?.id && pendingLocalIdRef.current) {
-        serverAssistIdRef.current = String(ack.data.id);
+        const srvId = String(ack.data.id);
+        setServerAssistId(srvId);
         await updateActivityItem(pendingLocalIdRef.current, {
           meta: {
             vehicleModel,
             plateNumber,
             otherInfo,
-            assistId: serverAssistIdRef.current,
+            assistId: srvId,
           },
         });
       }
@@ -279,10 +305,11 @@ const Home = () => {
     const onApproved = async (evt: any) => {
       const srvId = String(evt?.data?.id || "");
       if (!evt?.success || !srvId) return;
-      if (serverAssistIdRef.current && srvId !== serverAssistIdRef.current) return;
+      if (serverAssistId && srvId !== serverAssistId) return;
 
       const targetLocalId = pendingLocalIdRef.current;
-      if (targetLocalId) await updateActivityItem(targetLocalId, { status: "accepted" });
+      if (targetLocalId)
+        await updateActivityItem(targetLocalId, { status: "accepted" });
 
       // operator details from approval payload (if present)
       const operator: OperatorInfo | undefined = evt?.data?.operator
@@ -294,23 +321,20 @@ const Home = () => {
           }
         : undefined;
 
-      setOperatorStatus((s: OperatorStatusState) => ({
-        ...s,
-        visible: true,                    // << show card (replaces stepper)
-        assistId: srvId,
-        status: "en_route",
-        eta: evt?.data?.estimatedTimeWindow || "10:15 - 10:25 AM",
-        operator,
-      }));
+      setRequestStatus("accepted");
+      setIsRequesting(false);
 
       setOverlay({
         visible: true,
         kind: "accepted",
-        caption: "Please check your Inbox to communicate with your service provider",
+        caption:
+          "Please check your Inbox to communicate with your service provider",
       });
-      setRequestStatus("accepted");
-      setIsRequesting(false);
-      setTimeout(() => setOverlay((o) => ({ ...o, visible: false })), 1600);
+      setTimeout(() => {
+        setOverlay((o) => ({ ...o, visible: false }));
+        // Redirect to activity screen after approval
+        router.push("/(main)/(tabs)/activity");
+      }, 1600);
 
       // Unsubscribe these scoped listeners after acceptance
       onAssistApproved(onApproved, true);
@@ -328,24 +352,27 @@ const Home = () => {
       };
       const localStatus = map[raw] || "pending";
       const targetLocalId = pendingLocalIdRef.current;
-      if (targetLocalId) await updateActivityItem(targetLocalId, { status: localStatus });
+      if (targetLocalId)
+        await updateActivityItem(targetLocalId, { status: localStatus });
 
       // handle completion - show banner and navigate
       if (raw === "completed") {
-        setOperatorStatus((s: OperatorStatusState) => ({ ...s, visible: false }));
         setRequestStatus("idle");
-        
+
         // Show completed banner
         setOverlay({
           visible: true,
           kind: "completed",
           caption: "Your assistance request has been completed!",
         });
-        
+
         // Auto-navigate to activity after 4 seconds
         setTimeout(() => {
           setOverlay((o) => ({ ...o, visible: false }));
-          router.push("/(main)/(tabs)/activity");
+          router.push({
+            pathname: "/(main)/rate",
+            params: { id: srvId },
+          });
         }, 4000);
       }
     };
@@ -361,12 +388,12 @@ const Home = () => {
 
     const handleGlobalAssistApproved = async (evt: any) => {
       console.log("🔔 GLOBAL: assist:approved event received", evt);
-      
+
       const srvId = String(evt?.data?.id || "");
       if (!evt?.success || !srvId) return;
 
       // Check if this is for our current request
-      if (serverAssistIdRef.current && srvId !== serverAssistIdRef.current) {
+      if (serverAssistId && srvId !== serverAssistId) {
         console.log("⚠️ Event for different request, ignoring");
         return;
       }
@@ -380,16 +407,24 @@ const Home = () => {
       const operator: OperatorInfo | undefined = evt?.data?.operator
         ? {
             id: String(evt.data.operator.id ?? evt.data.operator._id ?? ""),
-            name: evt.data.operator.name || evt.data.operator.username || "Operator",
-            username: evt.data.operator.username || evt.data.operator.name || null,
-            fullName: evt.data.operator.fullName || evt.data.operator.name || evt.data.operator.username || null,
+            name:
+              evt.data.operator.name ||
+              evt.data.operator.username ||
+              "Operator",
+            username:
+              evt.data.operator.username || evt.data.operator.name || null,
+            fullName:
+              evt.data.operator.fullName ||
+              evt.data.operator.name ||
+              evt.data.operator.username ||
+              null,
             avatar: evt.data.operator.avatar ?? null,
             phone: evt.data.operator.phone || null,
             email: evt.data.operator.email || null,
             location: evt.data.operator.location || null,
           }
         : undefined;
-      
+
       // Update activity item with full operator data including location
       if (targetLocalId && operator) {
         await updateActivityItem(targetLocalId, {
@@ -411,23 +446,36 @@ const Home = () => {
       }
 
       // Show en route card
-      setOperatorStatus({
-        visible: true,
-        assistId: srvId,
-        status: "en_route",
-        eta: evt?.data?.estimatedTimeWindow || "10:15 - 10:25 AM",
-        operator,
-      });
-
       setRequestStatus("accepted");
       setIsRequesting(false);
+
+      // Trigger success haptic
+      if (Platform.OS !== "web") {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+
+      // Show toast notification
+      if (operator) {
+        toast.success(`Request accepted by ${operator.name}!`, {
+          duration: 5000,
+          onPress: () => router.push("/(main)/(tabs)/activity"),
+        });
+      }
 
       setOverlay({
         visible: true,
         kind: "accepted",
-        caption: "Please check your Inbox to communicate with your service provider",
+        operatorName: operator?.name,
+        operatorAvatar: operator?.avatar,
+        caption:
+          "Please check your Inbox to communicate with your service provider",
       });
-      setTimeout(() => setOverlay((o) => ({ ...o, visible: false })), 1600);
+
+      setTimeout(() => {
+        setOverlay((o) => ({ ...o, visible: false }));
+        // Logic change: Redirect to activity screen after approval
+        router.push("/(main)/(tabs)/activity");
+      }, 1600);
     };
 
     socket.on("assist:approved", handleGlobalAssistApproved);
@@ -437,7 +485,7 @@ const Home = () => {
       socket.off("assist:approved", handleGlobalAssistApproved);
       console.log("🛑 Global assist:approved listener removed");
     };
-  }, []);
+  }, [serverAssistId]);
 
   // 🔔 Global listener for assist status updates (including completed)
   useEffect(() => {
@@ -448,34 +496,32 @@ const Home = () => {
       if (!evt?.success || !evt?.data) return;
       const srvId = String(evt?.data?.id || "");
       if (!srvId) return;
-      
+
       const raw = String(evt?.data?.status || "").toLowerCase();
-      
-      // Handle completed status
+
+      // Update activity item if we have a match
+      const targetLocalId = pendingLocalIdRef.current;
+      if (targetLocalId) {
+        await updateActivityItem(targetLocalId, { status: raw as any });
+      }
+
       if (raw === "completed") {
-        console.log("✅ GLOBAL: Received completed status for request:", srvId);
-        
-        // Update activity item if we have it
-        const targetLocalId = pendingLocalIdRef.current;
-        if (targetLocalId) {
-          await updateActivityItem(targetLocalId, { status: "completed" });
-        }
-        
-        // Hide operator status card
-        setOperatorStatus((s: OperatorStatusState) => ({ ...s, visible: false }));
         setRequestStatus("idle");
-        
+
         // Show completed banner
         setOverlay({
           visible: true,
           kind: "completed",
           caption: "Your assistance request has been completed!",
         });
-        
+
         // Auto-navigate to activity after 4 seconds
         setTimeout(() => {
           setOverlay((o) => ({ ...o, visible: false }));
-          router.push("/(main)/(tabs)/activity");
+          router.push({
+            pathname: "/(main)/rate",
+            params: { id: srvId },
+          });
         }, 4000);
       }
     };
@@ -487,7 +533,7 @@ const Home = () => {
       socket.off("assist:status", handleGlobalAssistStatus);
       console.log("🛑 Global assist:status listener removed");
     };
-  }, []);
+  }, [serverAssistId]);
 
   // 🔔 Global listener for operator realtime status updates
   useEffect(() => {
@@ -496,19 +542,15 @@ const Home = () => {
       if (!evt?.success || !evt?.data) return;
       const assistId = String(evt.data.assistId || evt.data.id || "");
       if (!assistId) return;
-      if (serverAssistIdRef.current && assistId !== serverAssistIdRef.current) return;
+      if (serverAssistId && assistId !== serverAssistId) return;
 
-      const raw = String(evt.data.status || "").toLowerCase() as OperatorStatusKind;
+      const raw = String(
+        evt.data.status || "",
+      ).toLowerCase() as OperatorStatusKind;
       const nextStatus: OperatorStatusKind =
-        raw === "arrived" || raw === "working" || raw === "completed" ? (raw as OperatorStatusKind) : "en_route";
-
-      setOperatorStatus((prev: OperatorStatusState) => ({
-        visible: nextStatus !== "completed",
-        assistId,
-        status: nextStatus,
-        eta: evt.data.estimatedTime || prev.eta,
-        operator: evt.data.operator || prev.operator,
-      }));
+        raw === "arrived" || raw === "working" || raw === "completed"
+          ? (raw as OperatorStatusKind)
+          : "en_route";
 
       if (nextStatus === "completed") {
         setOverlay((o) => ({ ...o, visible: false }));
@@ -524,29 +566,71 @@ const Home = () => {
         socket.off("operator:statusUpdate", handleOperatorStatus);
       }
     };
-  }, []);
+  }, [serverAssistId]);
 
-  // 🔄 POLLING: Check database every 3 seconds while request is pending
+  // 🔔 Global listener for operator realtime location updates
   useEffect(() => {
-    if (requestStatus !== "requesting" || !serverAssistIdRef.current) return;
+    const socket = getSocket();
+    if (!socket) return;
 
-    console.log("🔄 Starting polling for request acceptance...");
-    
+    const handleLocationUpdate = (evt: any) => {
+      if (!evt?.success || !evt?.data?.operatorLocation) return;
+      console.log(
+        "📍 Operator location received (Home will not display):",
+        evt.data.operatorLocation,
+      );
+    };
+
+    socket.on("operator:locationChanged", handleLocationUpdate);
+    return () => {
+      socket.off("operator:locationChanged", handleLocationUpdate);
+    };
+  }, [serverAssistId]);
+
+  // �🔄 POLLING: Check database every 3 seconds while request is pending
+  useEffect(() => {
+    if (requestStatus !== "requesting" || !serverAssistId) return;
+
+    console.log(
+      `🔄 Starting polling for request ${serverAssistId} acceptance...`,
+    );
+
+    const startTime = Date.now();
+    const TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
     const checkStatus = async () => {
+      // Check for timeout
+      if (Date.now() - startTime > TIMEOUT_MS) {
+        console.log("⏱️ Request timeout reached");
+        setIsRequesting(false);
+        setRequestStatus("idle");
+        setOverlay({ visible: false, kind: "requesting" });
+        toast.error(
+          "No operators accepted your request within 5 minutes. Please try again.",
+          {
+            duration: 10000,
+          },
+        );
+        return;
+      }
+
       try {
         const token = await AsyncStorage.getItem("token");
-        const response = await fetch(`${API_URL}/api/assist/${serverAssistIdRef.current}`, {
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
+        const response = await fetch(
+          `${API_URL}/api/assist/${serverAssistId}`,
+          {
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
           },
-        });
+        );
 
         if (response.ok) {
           const data = await response.json();
           if (data.success && data.data?.status === "accepted") {
             console.log("✅ Polling detected acceptance!");
-            
+
             const operatorData = data.data.assignedTo || data.data.acceptedBy;
             const operator: OperatorInfo | undefined = operatorData
               ? {
@@ -557,23 +641,30 @@ const Home = () => {
                 }
               : undefined;
 
-            setOperatorStatus({
-              visible: true,
-              assistId: String(data.data._id),
-              status: "en_route",
-              eta: "10:15 - 10:25 AM",
-              operator,
-            });
-
             setRequestStatus("accepted");
             setIsRequesting(false);
+
+            // Notify user with toast
+            const msg = operator?.name
+              ? `Request accepted by ${operator.name}!`
+              : "Your request has been approved!";
+
+            toast.success(msg);
 
             setOverlay({
               visible: true,
               kind: "accepted",
-              caption: "Please check your Inbox to communicate with your service provider",
+              operatorName: operator?.name,
+              operatorAvatar: operator?.avatar,
+              caption:
+                "Please check your Inbox to communicate with your service provider",
             });
-            setTimeout(() => setOverlay((o) => ({ ...o, visible: false })), 1600);
+
+            setTimeout(() => {
+              setOverlay((o) => ({ ...o, visible: false }));
+              // Logic change: Redirect to activity screen after approval
+              router.push("/(main)/(tabs)/activity");
+            }, 1600);
           }
         }
       } catch (error) {
@@ -585,10 +676,10 @@ const Home = () => {
     checkStatus(); // Check immediately
 
     return () => {
-      console.log("🛑 Stopping polling");
+      console.log(`🛑 Stopping polling for ${serverAssistId}`);
       clearInterval(interval);
     };
-  }, [requestStatus]);
+  }, [requestStatus, serverAssistId]);
 
   // Don’t render MapView until tile host decision is made
   if (!mapStyle) {
@@ -601,7 +692,6 @@ const Home = () => {
 
   // Dynamic heights so content goes BEHIND the navbar,
   // while the sheet/card sits ABOVE it.
-  const bottomOverlayHeight = tabBarHeight + 300;
   const stepperInset = tabBarHeight + insets.bottom + 8;
 
   return (
@@ -615,7 +705,10 @@ const Home = () => {
       >
         <Camera
           ref={cameraRef}
-          defaultSettings={{ centerCoordinate: ILOILO_CENTER, zoomLevel: DEFAULT_ZOOM }}
+          defaultSettings={{
+            centerCoordinate: ILOILO_CENTER,
+            zoomLevel: DEFAULT_ZOOM,
+          }}
           maxBounds={PANAY_MAX_BOUNDS}
           followUserLocation={hasLocation}
           followZoomLevel={DEFAULT_ZOOM}
@@ -638,8 +731,14 @@ const Home = () => {
         {/* AOI overlay (only if you set a URL) */}
         {showAoi && !!AOI_GEOJSON_URL && (
           <ShapeSource id="aoi-geojson" url={AOI_GEOJSON_URL}>
-            <FillLayer id="aoi-fill" style={{ fillOpacity: 0.08, fillColor: "#000000" }} />
-            <LineLayer id="aoi-line" style={{ lineColor: "#000000", lineWidth: 1.5 }} />
+            <FillLayer
+              id="aoi-fill"
+              style={{ fillOpacity: 0.08, fillColor: "#000000" }}
+            />
+            <LineLayer
+              id="aoi-line"
+              style={{ lineColor: "#000000", lineWidth: 1.5 }}
+            />
             <SymbolLayer
               id="aoi-labels"
               style={{
@@ -655,20 +754,10 @@ const Home = () => {
         )}
       </MapView>
 
-      {/* General dark overlay for the entire map */}
-      <View style={styles.mapDarkOverlay}>
+      {/* Top-to-bottom dark gradient overlay */}
+      <View style={styles.mapGradientOverlay}>
         <LinearGradient
-          colors={["rgba(0,0,0,0.6)", "rgba(0,0,0,0.3)", "rgba(0,0,0,0.1)", "rgba(0,0,0,0.05)"]}
-          locations={[0, 0.3, 0.7, 1]}
-          style={StyleSheet.absoluteFill}
-        />
-      </View>
-
-      {/* Dark overlay for bottom sheet area (also extends under navbar) */}
-      <View style={[styles.darkOverlay, { height: bottomOverlayHeight }]}>
-        <LinearGradient
-          colors={["rgba(0,0,0,0.1)", "rgba(0,0,0,0.3)", "rgba(0,0,0,0.6)"]}
-          locations={[0, 0.5, 1]}
+          colors={["rgba(0,0,0,0.7)", "rgba(0,0,0,0.35)", "transparent"]}
           style={StyleSheet.absoluteFill}
         />
       </View>
@@ -681,34 +770,30 @@ const Home = () => {
         onCopy={handleCopyAddress}
       />
 
-      {/* ===== Bottom area: Stepper OR Operator En Route Card ===== */}
-      {/* EnRouteManager - Shows when operator accepts */}
-      <EnRouteManager
-        operatorStatus={operatorStatus}
+      {/* ===== Bottom area: Stepper ===== */}
+
+      {/* Show stepper even when operator is requesting/accepted */}
+      <RequestStepper
+        vehicleModel={vehicleModel}
+        setVehicleModel={setVehicleModel}
+        plateNumber={plateNumber}
+        setPlateNumber={setPlateNumber}
+        otherInfo={otherInfo}
+        setOtherInfo={setOtherInfo}
+        onRecenter={recenter}
         bottomInset={stepperInset}
+        onRequest={onRequestAssist}
+        isRequesting={isRequesting}
+        requestStatus={requestStatus}
       />
-      
-      {/* Show stepper only when operator is not en route */}
-      {!operatorStatus.visible && (
-        <RequestStepper
-          vehicleModel={vehicleModel}
-          setVehicleModel={setVehicleModel}
-          plateNumber={plateNumber}
-          setPlateNumber={setPlateNumber}
-          otherInfo={otherInfo}
-          setOtherInfo={setOtherInfo}
-          onRecenter={recenter}
-          bottomInset={stepperInset}
-          onRequest={onRequestAssist}
-          isRequesting={isRequesting}
-        />
-      )}
 
       {/* Status overlays */}
       <RequestStatusOverlay
         visible={overlay.visible}
         kind={overlay.kind}
         caption={overlay.caption}
+        operatorName={overlay.operatorName}
+        operatorAvatar={overlay.operatorAvatar}
         onClose={() => {
           setOverlay((prev) => ({ ...prev, visible: false }));
           if (overlay.kind === "requesting") {
@@ -730,19 +815,12 @@ const styles = StyleSheet.create({
   },
   container: { flex: 1 },
 
-  mapDarkOverlay: {
+  mapGradientOverlay: {
     position: "absolute",
     top: 0,
     left: 0,
     right: 0,
-    bottom: 0,
-    pointerEvents: "none",
-  },
-  darkOverlay: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
+    height: "50%", // Gradient covers the top half
     pointerEvents: "none",
   },
 
@@ -759,5 +837,39 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     shadowOffset: { width: 0, height: 2 },
     overflow: "hidden",
+  },
+  operatorMarker: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#6EFF87",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 3,
+    borderColor: "#000",
+    elevation: 10,
+    shadowColor: "#000",
+    shadowOpacity: 0.5,
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 4 },
+  },
+
+  enRouteWrapper: {
+    position: "absolute",
+    left: 16,
+    right: 16,
+    gap: 10,
+  },
+  requestAgainBtn: {
+    backgroundColor: "#6EFF87",
+    height: 48,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
   },
 });

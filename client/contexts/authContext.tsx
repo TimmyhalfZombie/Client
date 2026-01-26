@@ -88,12 +88,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     password: string,
     name: string,
     phone?: string,
-    avatar?: string | null
+    avatar?: string | null,
   ) => {
     const response = await register(email, password, name, avatar ?? "", phone);
     await updateToken(response.token);
     await connectSocket();
-    console.log("🔍 User signed up with email:", email, "and token:", response.token);
+    console.log(
+      "🔍 User signed up with email:",
+      email,
+      "and token:",
+      response.token,
+    );
     router.replace("/patching");
   };
 

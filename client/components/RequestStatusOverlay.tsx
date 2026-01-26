@@ -27,6 +27,9 @@ type Props = {
   blockTouches?: boolean;
   activityItemId?: string; // local id
   assistId?: string; // server id
+  // NEW: Operator info for accepted state
+  operatorName?: string;
+  operatorAvatar?: string | null;
 };
 
 export default function RequestStatusOverlay({
@@ -43,6 +46,8 @@ export default function RequestStatusOverlay({
   blockTouches = true,
   activityItemId,
   assistId,
+  operatorName,
+  operatorAvatar,
 }: Props) {
   const isAccepted = kind === "accepted";
   const isCompleted = kind === "completed";
@@ -57,7 +62,7 @@ export default function RequestStatusOverlay({
   const acceptedTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [acceptedCountdown, setAcceptedCountdown] = useState(
-    Math.ceil(autoCloseMsAccepted / 1000)
+    Math.ceil(autoCloseMsAccepted / 1000),
   );
 
   const animateIn = () => {
@@ -151,7 +156,7 @@ export default function RequestStatusOverlay({
     if (showAcceptedCountdown && autoCloseMsAccepted > 0) {
       acceptedTickRef.current = setInterval(
         () => setAcceptedCountdown((s) => Math.max(0, s - 1)),
-        1000
+        1000,
       );
     }
     if (autoCloseMsAccepted > 0) {
@@ -179,33 +184,7 @@ export default function RequestStatusOverlay({
     animateOut(onClose);
   };
 
-  // 🔴 Cancel from overlay: flip status to "canceled" (robust even if ids are missing)
-  const handleCancel = async () => {
-    try {
-      clearRequestTimer();
-
-      const markCanceled =
-        (activityStore as any).markActivityCanceled ??
-        ((where: any) =>
-          (activityStore as any).setActivityStatus?.(where, "canceled"));
-
-      // Try with provided ids first
-      let ok = false;
-      if (activityItemId || assistId) {
-        ok = (await markCanceled?.({ id: activityItemId, assistId })) === true;
-      }
-      // Fallback: cancel most recent pending if ids weren’t provided/matched
-      if (!ok && (activityStore as any).cancelMostRecentPending) {
-        await (activityStore as any).cancelMostRecentPending();
-      }
-      // Store emits change → Activity reloads via onActivityChange()
-    } finally {
-      animateOut(() => {
-        onCancel?.(); // parent can also call load()
-        onClose?.();
-      });
-    }
-  };
+  // Overlay is now persistent during requesting phase as requested
 
   if (!internalVisible) return null;
 
@@ -247,11 +226,40 @@ export default function RequestStatusOverlay({
                 >
                   Assistance accepted
                 </Typo>
+                {/* Show operator name if available */}
+                {!!operatorName && (
+                  <Typo
+                    size={14}
+                    color={colors.green}
+                    fontWeight="700"
+                    style={{ marginTop: spacingY._4 }}
+                  >
+                    by {operatorName}
+                  </Typo>
+                )}
+                {!!caption && (
+                  <Typo
+                    size={12}
+                    color={colors.white}
+                    fontFamily="InterLight"
+                    style={{
+                      marginTop: spacingY._4,
+                      opacity: 0.9,
+                      textAlign: "center",
+                    }}
+                  >
+                    {caption}
+                  </Typo>
+                )}
               </>
             ) : isCompleted ? (
               <>
                 <View style={styles.badgeCompleted}>
-                  <Icons.CheckCircle size={36} color={colors.black} weight="bold" />
+                  <Icons.CheckCircle
+                    size={36}
+                    color={colors.black}
+                    weight="bold"
+                  />
                 </View>
                 <Typo
                   size={18}
@@ -305,7 +313,6 @@ export default function RequestStatusOverlay({
                     style={[styles.progressFill, { width: progressWidth }]}
                   />
                 </View>
-
               </>
             )}
           </View>
@@ -360,14 +367,4 @@ const styles = StyleSheet.create({
     backgroundColor: colors.green,
     borderRadius: 999,
   },
-  cancelBtn: {
-    marginTop: spacingY._10,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 10,
-    backgroundColor: "rgba(0, 0, 0, 0.69)",
-    borderColor: "#6EFF87",
-    borderWidth: 1,
-  },
-  cancelText: { color: colors.white, fontWeight: "600" },
 });
