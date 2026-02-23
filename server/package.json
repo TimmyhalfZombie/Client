@@ -22,6 +22,7 @@
     "expo-server-sdk": "^4.0.0",
     "express": "^5.1.0",
     "google-auth-library": "^10.5.0",
+    "iconv-lite": "^0.6.3",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.16.4",
     "nodemailer": "^7.0.6",
