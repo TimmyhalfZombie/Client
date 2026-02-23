@@ -1,8 +1,7 @@
 import { useState, useCallback } from "react";
 import { Step } from "@/types";
 import { useAuth } from "@/contexts/authContext";
-
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "http://localhost:3000";
+import { API_URL } from "@/constants";
 
 export function useRoute() {
   const { token } = useAuth();
@@ -22,7 +21,7 @@ export function useRoute() {
           destination: { lat: dest[1], lng: dest[0] },
         };
 
-        const res = await fetch(`${API_BASE_URL}/api/routing/route`, {
+        const res = await fetch(`${API_URL}/api/routing/route`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -86,7 +85,7 @@ export function useRoute() {
           customerLocation,
         };
 
-        const res = await fetch(`${API_BASE_URL}/api/routing/eta`, {
+        const res = await fetch(`${API_URL}/api/routing/eta`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",

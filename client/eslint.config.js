@@ -11,9 +11,9 @@ module.exports = defineConfig([
     ignores: ['dist/*'],
 
     // add the import plugin so resolver works in flat config
-    plugins: {
-      import: require('eslint-plugin-import'),
-    },
+    // plugins: {
+    //   import: require('eslint-plugin-import'),
+    // },
 
     // teach ESLint how to resolve TS path aliases (uses your tsconfig.json)
     settings: {

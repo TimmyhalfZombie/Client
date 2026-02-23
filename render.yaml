@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: patch-up-backend
+    env: node
+    plan: free
+    region: singapore # You can change this
+    rootDir: server
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 18.18.0
+      - key: MONGO_URI
+        sync: false
+      - key: APPDB_URI
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: ORS_API_KEY
+        sync: false
+      - key: PORT
+        value: 3000
