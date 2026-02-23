@@ -19,12 +19,12 @@ import { ConversationProps, ResponseProps } from "@/types";
 import { getSocket } from "@/socket/socket";
 
 import ConversationActionsSheet from "@/components/ConversationActionsSheet";
+import { useChat } from "@/contexts/ChatContext";
 import Animated, {
   FadeInDown,
   FadeInUp,
   LinearTransition,
 } from "react-native-reanimated";
-
 
 const sortByRecent = (a: ConversationProps, b: ConversationProps) => {
   const aDate = a?.lastMessage?.createdAt || a.createdAt;
@@ -34,114 +34,47 @@ const sortByRecent = (a: ConversationProps, b: ConversationProps) => {
 
 const Message = () => {
   const { signOut } = useAuth();
+  const { conversations, refreshConversations } = useChat();
   const router = useRouter();
 
   const [loading, setLoading] = useState(false);
-  const [conversations, setConversations] = useState<ConversationProps[]>([]);
 
   // sheet state
   const [sheetOpen, setSheetOpen] = useState(false);
   const [selected, setSelected] = useState<ConversationProps | null>(null);
 
-  useEffect(() => {
-    getConversations(processConversations);
-    newConversation(newConversationHandler);
-    getConversations(null);
-    return () => {
-      getConversations(processConversations, true);
-      newConversation(newConversationHandler, true);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   useFocusEffect(
     useCallback(() => {
-      getConversations(null);
+      refreshConversations();
       return () => {};
-    }, [])
+    }, [refreshConversations]),
   );
 
-  // live updates: conversationUpdated + conversationDeleted
-  useEffect(() => {
-    const socket = getSocket();
-    if (!socket) return;
-
-    const onUpdated = (evt: any) => {
-      if (!evt?.success || !evt?.data) return;
-      const updatedConv = evt.data;
-      console.log(`🔄 Conversation updated: ${updatedConv._id}, unreadCount: ${(updatedConv as any).unreadCount}`);
-      setConversations((prev) => {
-        const map = new Map(prev.map((c) => [c._id, c]));
-        map.set(updatedConv._id, updatedConv);
-        const arr = Array.from(map.values());
-        arr.sort(sortByRecent);
-        return arr;
-      });
-    };
-
-    const onDeletedEvt = (evt: any) => {
-      if (evt?.success && evt?.conversationId) {
-        setConversations((prev) =>
-          prev.filter((c) => c._id !== evt.conversationId)
-        );
-      }
-    };
-
-    socket.on("conversationUpdated", onUpdated);
-    socket.on("conversationDeleted", onDeletedEvt);
-
-    return () => {
-      socket.off("conversationUpdated", onUpdated);
-      socket.off("conversationDeleted", onDeletedEvt);
-    };
-  }, []);
-
-  const processConversations = (res: ResponseProps) => {
-    if (res.success) {
-      const arr = [...res.data].sort(sortByRecent);
-      setConversations(arr);
-    }
-  };
-
-  const newConversationHandler = (res: ResponseProps) => {
-    if (res.success && res.data?.isNew) {
-      setConversations((prev) => {
-        const arr = [...prev, res.data].sort(sortByRecent);
-        return arr;
-      });
-    }
-  };
+  const sortedConversations = [...conversations].sort(sortByRecent);
 
   const openSheet = (item: ConversationProps) => {
     setSelected(item);
     setSheetOpen(true);
   };
 
-
-  const handleDelete = () => {
-    if (!selected) return;
-    Alert.alert(
-      "Delete conversation",
-      "This will delete all messages for everyone. Continue?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: () =>
-            deleteConversation({
-              conversationId: selected._id,
-              cb: (res) => {
-                if (!res.success)
-                  Alert.alert("Error", res.msg || "Failed to delete");
-                setSheetOpen(false);
-              },
-            }),
-        },
-      ]
-    );
+  const handleDelete = (done: () => void) => {
+    if (!selected) {
+      done();
+      return;
+    }
+    deleteConversation({
+      conversationId: selected._id,
+      cb: (res) => {
+        if (!res.success) {
+          Alert.alert("Error", res.msg || "Failed to delete");
+        } else {
+          setSheetOpen(false);
+          setSelected(null);
+        }
+        done();
+      },
+    });
   };
-
 
   return (
     <ScreenWrapper style={{ paddingTop: 0, backgroundColor: "#121217" }}>
@@ -181,7 +114,7 @@ const Message = () => {
               layout={LinearTransition.springify().damping(18).stiffness(220)}
               style={styles.conversationList}
             >
-              {conversations.map((item: ConversationProps, index) => (
+              {sortedConversations.map((item: ConversationProps, index) => (
                 <Animated.View
                   key={(item as any)._id || `${item.type}-${index}`}
                   entering={FadeInUp.duration(180).delay(index * 30)}
@@ -190,6 +123,7 @@ const Message = () => {
                     item={item}
                     router={router}
                     showDivider={false}
+                    onMorePress={openSheet}
                     onLongPress={openSheet}
                   />
                   {index !== conversations.length - 1 && (
@@ -199,7 +133,7 @@ const Message = () => {
               ))}
             </Animated.View>
 
-            {!loading && conversations.length === 0 && (
+            {!loading && sortedConversations.length === 0 && (
               <Typo
                 color={colors.white}
                 fontFamily="InterLight"
@@ -216,7 +150,11 @@ const Message = () => {
 
       <ConversationActionsSheet
         visible={sheetOpen}
-        onClose={() => setSheetOpen(false)}
+        conversationName={selected?.name || undefined}
+        onClose={() => {
+          setSheetOpen(false);
+          setSelected(null);
+        }}
         onDelete={handleDelete}
       />
     </ScreenWrapper>

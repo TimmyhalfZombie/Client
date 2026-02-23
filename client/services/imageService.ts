@@ -1,4 +1,4 @@
-// client/services/imageServices.ts 
+// client/services/imageServices.ts
 
 import { CLOUDINARY_CLOUD_NAME, CLOUDINARY_UPLOAD_PRESET } from "@/constants";
 import { ResponseProps } from "@/types";
@@ -8,7 +8,7 @@ const CLOUDINARY_API_URL = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_N
 
 export const uploadFileToCloudinary = async (
   file: { uri?: string } | string,
-  folderName: string
+  folderName: string,
 ): Promise<ResponseProps> => {
   try {
     if (!file) return { success: true, data: null };
@@ -44,9 +44,19 @@ export const uploadFileToCloudinary = async (
 };
 
 export const getAvatarPath = (file: any) => {
-  if (file && typeof file == "string") return file;
+  if (file && typeof file === "string" && file.trim() !== "") {
+    if (file === "null" || file === "undefined" || file.includes("null")) {
+      // Fall through to default
+    } else {
+      return file;
+    }
+  }
 
-  if (file && typeof file == "object") return file.uri;
+  if (file && typeof file === "object") {
+    const res = file.uri || file.url;
+    if (res && typeof res === "string" && res.trim() !== "" && res !== "null")
+      return res;
+  }
 
   return require("../assets/images/defaultAvatar.png");
 };

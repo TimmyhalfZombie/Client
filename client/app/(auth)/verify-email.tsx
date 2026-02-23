@@ -24,14 +24,14 @@ export default function VerifyEmail() {
 
   // Create refs for each input box
   const inputsRef = useRef<Array<TextInput | null>>(
-    Array(DIGIT_COUNT).fill(null)
+    Array(DIGIT_COUNT).fill(null),
   );
 
   // State for each digit
   const [digits, setDigits] = useState<string[]>(
     initialCode && initialCode.length === DIGIT_COUNT
       ? initialCode.split("")
-      : Array(DIGIT_COUNT).fill("")
+      : Array(DIGIT_COUNT).fill(""),
   );
 
   // Modal visibility for PIN popup
@@ -39,14 +39,17 @@ export default function VerifyEmail() {
 
   // On mount: if we have a valid PIN, show modal, prefill, focus, auto-hide
   useEffect(() => {
+    let timer: any;
     if (initialCode && initialCode.length === DIGIT_COUNT) {
       setShowModal(true);
       // auto-dismiss after 10 seconds
-      const timer = setTimeout(() => setShowModal(false), 10_000);
+      timer = setTimeout(() => setShowModal(false), 10_000);
       // focus first input
       inputsRef.current[0]?.focus();
-      return () => clearTimeout(timer);
     }
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
   }, [initialCode]);
 
   // Handle digit change

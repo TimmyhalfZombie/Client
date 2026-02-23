@@ -28,8 +28,18 @@ export const getMessages = (payload: any, off: boolean = false) =>
   wire("getMessages", payload, off);
 export const newMessage = (payload: any, off: boolean = false) =>
   wire("newMessage", payload, off);
-export const markAsRead = (payload: string, off: boolean = false) =>
+export const markAsRead = (payload: string, off: boolean = false) => {
+  if (!off) {
+    // ✅ Only emit if it looks like a valid 24-char hex ObjectId
+    const isValidId =
+      typeof payload === "string" && /^[a-f\d]{24}$/i.test(payload);
+    if (!isValidId) {
+      console.warn("[markAsRead] skipped – invalid conversationId:", payload);
+      return;
+    }
+  }
   wire("markAsRead", payload, off);
+};
 export const conversationUpdated = (payload: any, off: boolean = false) =>
   wire("conversationUpdated", payload, off);
 
@@ -39,7 +49,7 @@ export const assistRequest = (payload: any, off: boolean = false) =>
 
 export const registerPushToken = (
   payload: { token: string },
-  off: boolean = false
+  off: boolean = false,
 ) => wire("registerPushToken", payload, off);
 export const messageDelivered = (payload: any, off: boolean = false) =>
   wire("messageDelivered", payload, off);
@@ -60,7 +70,6 @@ export const deleteConversation = (params: {
 export const conversationDeleted = (payload: any, off: boolean = false) =>
   wire("conversationDeleted", payload, off);
 
-
 /* ===================== Assist (Customer) ===================== */
 /**
  * Emits the correct payload for your server:
@@ -80,7 +89,7 @@ export const assistCreate = (
     customerName?: string;
     customerPhone?: string;
   },
-  cb?: (ack: any) => void
+  cb?: (ack: any) => void,
 ) => {
   const socket = getSocket();
   if (!socket) return;
@@ -97,7 +106,7 @@ export const assistCreate = (
   const enhancedPayload = {
     ...payload,
     requestDate: payload.requestDate || new Date().toISOString(),
-    timestamp: Date.now()
+    timestamp: Date.now(),
   };
 
   // Legacy event used by your server; also emits future-proof alias
@@ -119,7 +128,10 @@ export const onAssistAccepted = (cb: (evt: any) => void, off = false) =>
   wire("assist:accepted", cb, off);
 
 // Operator actions
-export const assistAccept = (payload: { id: string }, cb?: (ack: any) => void) => {
+export const assistAccept = (
+  payload: { id: string },
+  cb?: (ack: any) => void,
+) => {
   const socket = getSocket();
   if (!socket) return;
 
@@ -137,9 +149,18 @@ export const assistAccept = (payload: { id: string }, cb?: (ack: any) => void) =
 export const joinOperators = (cb?: (evt: any) => void, off = false) =>
   wire("joinOperators", cb, off);
 
-export const assistStatus = (payload: any, cb?: (evt: any) => void, off = false) =>
-  wire("assist:status", payload, off);
-export const assistCancel = (payload: any, cb?: (evt: any) => void, off = false) =>
-  wire("assist:cancel", payload, off);
-export const assistDetails = (payload: any, cb?: (evt: any) => void, off = false) =>
-  wire("assist:details", payload, off); 
+export const assistStatus = (
+  payload: any,
+  cb?: (evt: any) => void,
+  off = false,
+) => wire("assist:status", payload, off);
+export const assistCancel = (
+  payload: any,
+  cb?: (evt: any) => void,
+  off = false,
+) => wire("assist:cancel", payload, off);
+export const assistDetails = (
+  payload: any,
+  cb?: (evt: any) => void,
+  off = false,
+) => wire("assist:details", payload, off);

@@ -20,6 +20,7 @@ export const AuthContext = createContext<AuthContextProps>({
   signUp: async () => {},
   signOut: async () => {},
   updateToken: async () => {},
+  clearAuth: async () => {},
 });
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
@@ -102,11 +103,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     router.replace("/patching");
   };
 
-  const signOut = async () => {
+  const clearAuth = async () => {
     setToken(null);
     setUser(null);
     await AsyncStorage.removeItem("token");
     await disconnectSocket();
+  };
+
+  const signOut = async () => {
+    await clearAuth();
     router.replace("/(auth)/welcome");
   };
 
@@ -119,6 +124,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         signUp,
         signOut,
         updateToken,
+        clearAuth,
       }}
     >
       {children}

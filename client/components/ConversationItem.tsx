@@ -1,48 +1,116 @@
-import { StyleSheet, TouchableOpacity, View } from "react-native";
-import React from "react";
+import React, { useEffect, useRef } from "react";
+import { StyleSheet, TouchableOpacity, View, Animated } from "react-native";
 import { colors, spacingX, spacingY } from "@/constants/theme";
 import Avatar from "./Avatar";
 import Typo from "./Typo";
 import moment from "moment";
 import { ConversationListItemProps } from "@/types";
 import { useAuth } from "@/contexts/authContext";
+import * as Icons from "phosphor-react-native";
 
 type Props = ConversationListItemProps & {
+  onMorePress?: (item: ConversationListItemProps["item"]) => void;
   onLongPress?: (item: ConversationListItemProps["item"]) => void;
 };
 
-const ConversationItem = ({ item, showDivider, router, onLongPress }: Props) => {
-  const { user: currentUser } = useAuth();
+/** Animated ping beacon shown when there are unread messages */
+const PulseDot = () => {
+  const scale = useRef(new Animated.Value(1)).current;
+  const opacity = useRef(new Animated.Value(0.7)).current;
 
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.parallel([
+          Animated.timing(scale, {
+            toValue: 1.6,
+            duration: 700,
+            useNativeDriver: true,
+          }),
+          Animated.timing(opacity, {
+            toValue: 0,
+            duration: 700,
+            useNativeDriver: true,
+          }),
+        ]),
+        Animated.parallel([
+          Animated.timing(scale, {
+            toValue: 1,
+            duration: 0,
+            useNativeDriver: true,
+          }),
+          Animated.timing(opacity, {
+            toValue: 0.7,
+            duration: 0,
+            useNativeDriver: true,
+          }),
+        ]),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, []);
+
+  return (
+    <View style={styles.dotWrap}>
+      <Animated.View
+        style={[styles.dotRing, { transform: [{ scale }], opacity }]}
+      />
+      <View style={styles.dotCore} />
+    </View>
+  );
+};
+
+const UnreadBadge = ({ count }: { count: number }) => {
+  if (count <= 1) return <PulseDot />;
+  return (
+    <View style={styles.badge}>
+      <Typo size={10} fontWeight="700" color={colors.black}>
+        {count > 99 ? "99+" : String(count)}
+      </Typo>
+    </View>
+  );
+};
+
+const ConversationItem = ({
+  item,
+  showDivider,
+  router,
+  onMorePress,
+  onLongPress,
+}: Props) => {
+  const { user: currentUser } = useAuth();
   const lastMessage: any = item.lastMessage;
 
-  // robust direct detection
   const isDirect =
     item?.type === "direct" ||
     (Array.isArray(item?.participants) && item.participants.length === 2);
+  const participants = Array.isArray(item?.participants)
+    ? item.participants
+    : [];
 
-  const participants = Array.isArray(item?.participants) ? item.participants : [];
-
-  // find other participant
   const otherParticipant =
     isDirect && participants.length
-      ? participants.find((p: any) => String(p?._id) !== String(currentUser?.id))
+      ? participants.find(
+          (p: any) => String(p?._id) !== String(currentUser?.id),
+        )
       : null;
 
-  // fallback: last sender if not me
   const lastSender = lastMessage?.senderId as any;
-  const lastSenderIsMe = lastSender && String(lastSender._id) === String(currentUser?.id);
-  const fallbackFromLastSender = !lastSenderIsMe && (lastSender?.name || lastSender?.username);
+  const lastSenderIsMe =
+    lastSender && String(lastSender._id) === String(currentUser?.id);
+  const fallbackFromLastSender =
+    !lastSenderIsMe && (lastSender?.name || lastSender?.username);
 
-  // final name (shows "Tim")
   const conversationName =
     (isDirect && (otherParticipant?.name || otherParticipant?.username)) ||
     fallbackFromLastSender ||
     item.name ||
     "Conversation";
 
-  // avatar
-  const avatar = isDirect ? otherParticipant?.avatar || item.avatar : item.avatar;
+  const avatar = isDirect
+    ? otherParticipant?.avatar || item.avatar
+    : item.avatar;
 
   const unreadCount = Number((item as any).unreadCount ?? 0);
   const hasUnread = unreadCount > 0;
@@ -63,7 +131,7 @@ const ConversationItem = ({ item, showDivider, router, onLongPress }: Props) => 
       pathname: "/(main)/conversation",
       params: {
         id: item._id,
-        name: conversationName, // keep header consistent
+        name: conversationName,
         avatar: item.avatar,
         type: item.type,
         participants: JSON.stringify(item.participants),
@@ -71,69 +139,96 @@ const ConversationItem = ({ item, showDivider, router, onLongPress }: Props) => 
     });
   };
 
+  const getPreviewText = () => {
+    if (!lastMessage) return "Say hi 👋";
+    if (lastMessage.attachment) return "📷 Image";
+    return lastMessage.content || "Message";
+  };
+
   return (
     <View>
       <TouchableOpacity
-        style={styles.conversationItem}
+        style={[styles.row, hasUnread && styles.rowUnread]}
         onPress={openConversation}
         delayLongPress={250}
         onLongPress={() => onLongPress?.(item)}
+        activeOpacity={0.72}
       >
-        <Avatar uri={avatar} size={47} />
+        {/* Avatar with online dot */}
+        <View style={styles.avatarWrap}>
+          <Avatar uri={avatar} size={50} />
+          {hasUnread && <View style={styles.onlineDot} />}
+        </View>
 
-        <View style={{ flex: 1 }}>
-          <View style={styles.row}>
-            <View style={styles.nameContainer}>
+        {/* Text block */}
+        <View style={styles.textBlock}>
+          <View style={styles.nameLine}>
+            <Typo
+              size={15}
+              fontFamily="InterLight"
+              fontWeight={hasUnread ? "800" : "600"}
+              color={hasUnread ? colors.white : colors.neutral300}
+              style={{ flex: 1 }}
+              textProps={{ numberOfLines: 1 }}
+            >
+              {conversationName}
+            </Typo>
+
+            {timeLabel ? (
               <Typo
-                size={17}
+                size={12}
                 fontFamily="InterLight"
-                fontWeight={hasUnread ? "800" : undefined}
-                color={colors.neutral100}
-                style={styles.nameText}
+                color={hasUnread ? colors.green : colors.neutral500}
+                style={{ marginLeft: spacingX._8 }}
               >
-                {conversationName}
+                {timeLabel}
               </Typo>
-            </View>
-
-            <View style={styles.rightMeta}>
-              {timeLabel ? (
-                <Typo
-                  size={13}
-                  color={colors.neutral200}
-                  fontFamily="InterLight"
-                  style={styles.timeText}
-                >
-                  {timeLabel}
-                </Typo>
-              ) : null}
-              {hasUnread && <View style={styles.dot} />}
-            </View>
+            ) : null}
           </View>
 
-          {hasUnread ? (
-            <Typo
-              size={15}
-              color={colors.green}
-              fontFamily="InterLight"
-              style={{ marginTop: -10 }}
-            >
-              {unreadCount === 1 ? "1 new message" : `${unreadCount} new messages`}
-            </Typo>
-          ) : lastMessage ? (
-            <Typo
-              size={15}
-              color={colors.neutral400}
-              textProps={{ numberOfLines: 1 }}
-              fontFamily="InterLight"
-            >
-              {lastMessage.attachment ? "Image" : lastMessage.content || "Message"}
-            </Typo>
-          ) : (
-            <Typo size={15} color={colors.neutral400} fontFamily="InterLight">
-              Say hi
-            </Typo>
-          )}
+          <View style={styles.previewLine}>
+            {hasUnread ? (
+              <Typo
+                size={14}
+                fontFamily="InterLight"
+                fontWeight="700"
+                color={colors.green}
+                style={{ flex: 1 }}
+                textProps={{ numberOfLines: 1 }}
+              >
+                {unreadCount === 1
+                  ? "1 new message"
+                  : `${unreadCount} new messages`}
+              </Typo>
+            ) : (
+              <Typo
+                size={14}
+                fontFamily="InterLight"
+                color={colors.neutral500}
+                style={{ flex: 1 }}
+                textProps={{ numberOfLines: 1 }}
+              >
+                {getPreviewText()}
+              </Typo>
+            )}
+
+            {hasUnread && <UnreadBadge count={unreadCount} />}
+          </View>
         </View>
+
+        {/* 3-dots more button */}
+        <TouchableOpacity
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          onPress={() => onMorePress?.(item)}
+          style={styles.moreBtn}
+          activeOpacity={0.6}
+        >
+          <Icons.DotsThreeVertical
+            size={20}
+            color={colors.neutral500}
+            weight="bold"
+          />
+        </TouchableOpacity>
       </TouchableOpacity>
 
       {showDivider && <View style={styles.divider} />}
@@ -143,37 +238,79 @@ const ConversationItem = ({ item, showDivider, router, onLongPress }: Props) => 
 
 export default ConversationItem;
 
+const DOT_SIZE = 10;
+const BADGE_SIZE = 18;
+
 const styles = StyleSheet.create({
-  conversationItem: {
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: spacingX._4,
+    paddingVertical: spacingY._10,
+    borderRadius: 14,
     gap: spacingX._12,
-    marginVertical: spacingY._12,
+  },
+  rowUnread: {
+    backgroundColor: "rgba(110,255,135,0.05)",
+  },
+  avatarWrap: { position: "relative" },
+  onlineDot: {
+    position: "absolute",
+    bottom: 1,
+    right: 1,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: colors.green,
+    borderWidth: 2,
+    borderColor: "#0D0D0D",
+  },
+  textBlock: { flex: 1 },
+  nameLine: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 3,
+  },
+  previewLine: {
     flexDirection: "row",
     alignItems: "center",
   },
-  row: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
+  moreBtn: {
+    padding: 4,
   },
-  nameContainer: {
-    flex: 1,
-    flexDirection: "column",
+  dotWrap: {
+    width: DOT_SIZE,
+    height: DOT_SIZE,
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: spacingX._8,
   },
-  rightMeta: { flexDirection: "column", alignItems: "flex-end" },
-  nameText: { includeFontPadding: false, lineHeight: 20 },
-  timeText: { includeFontPadding: false, lineHeight: 16 },
-  dot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+  dotRing: {
+    position: "absolute",
+    width: DOT_SIZE,
+    height: DOT_SIZE,
+    borderRadius: DOT_SIZE / 2,
     backgroundColor: colors.green,
-    marginTop: 6,
-    alignSelf: "center",
+  },
+  dotCore: {
+    width: DOT_SIZE,
+    height: DOT_SIZE,
+    borderRadius: DOT_SIZE / 2,
+    backgroundColor: colors.green,
+  },
+  badge: {
+    minWidth: BADGE_SIZE,
+    height: BADGE_SIZE,
+    borderRadius: BADGE_SIZE / 2,
+    backgroundColor: colors.green,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 4,
+    marginLeft: spacingX._8,
   },
   divider: {
     height: 1,
-    width: "95%",
-    alignSelf: "center",
-    backgroundColor: "rgba(47, 43, 43, 1)",
+    backgroundColor: "#1E2025",
+    marginHorizontal: spacingX._4,
   },
 });

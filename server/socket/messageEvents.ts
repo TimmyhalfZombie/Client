@@ -35,11 +35,18 @@ async function getUserFromEitherDb(userId: string): Promise<any> {
   try {
     const appdbConnection = getAppdbConnection();
     const AppdbUserSchema = new Schema(
-      { username: String, name: String, email: String, avatar: String, phone: String },
-      { collection: "users", strict: false }
+      {
+        username: String,
+        name: String,
+        email: String,
+        avatar: String,
+        phone: String,
+      },
+      { collection: "users", strict: false },
     );
     const AppdbUser =
-      appdbConnection.models.User || appdbConnection.model("User", AppdbUserSchema);
+      appdbConnection.models.User ||
+      appdbConnection.model("User", AppdbUserSchema);
 
     const appdbUser: any = await AppdbUser.findById(userId)
       .select("username name avatar email _id")
@@ -90,11 +97,19 @@ async function getPushTokensFromBothDbs(userIds: string[]): Promise<string[]> {
       try {
         const appdbConnection = getAppdbConnection();
         const AppdbUserSchema = new Schema(
-          { username: String, name: String, email: String, avatar: String, phone: String, expoPushToken: String },
-          { collection: "users", strict: false }
+          {
+            username: String,
+            name: String,
+            email: String,
+            avatar: String,
+            phone: String,
+            expoPushToken: String,
+          },
+          { collection: "users", strict: false },
         );
         const AppdbUser =
-          appdbConnection.models.User || appdbConnection.model("User", AppdbUserSchema);
+          appdbConnection.models.User ||
+          appdbConnection.model("User", AppdbUserSchema);
 
         const appdbUsers = await AppdbUser.find({
           _id: { $in: missingIds },
@@ -125,7 +140,7 @@ async function sendPushToExpo(tokens: string[], message: PushPayloadWithoutTo) {
   if (!valid.length) return;
 
   const chunks = expo.chunkPushNotifications(
-    valid.map<ExpoPushMessage>((token) => ({ to: token, ...message }))
+    valid.map<ExpoPushMessage>((token) => ({ to: token, ...message })),
   );
 
   for (const chunk of chunks) {
@@ -142,7 +157,10 @@ export function registerMessageEvents(io: SocketIOServer, socket: Socket) {
   socket.on("getMessages", async (conversationId: string) => {
     try {
       if (!socket.data.userId)
-        return socket.emit("getMessages", { success: false, msg: "Unauthorized" });
+        return socket.emit("getMessages", {
+          success: false,
+          msg: "Unauthorized",
+        });
 
       const messages = await Message.find({ conversationId })
         .sort({ createdAt: -1 })
@@ -154,38 +172,52 @@ export function registerMessageEvents(io: SocketIOServer, socket: Socket) {
           const sender = await getUserFromEitherDb(String(msg.senderId));
           return {
             ...msg,
-            senderId:
-              sender || {
-                _id: msg.senderId,
-                name: "Unknown",
-                username: "",
-                avatar: "",
-                email: "",
-              },
+            senderId: sender || {
+              _id: msg.senderId,
+              name: "Unknown",
+              username: "",
+              avatar: "",
+              email: "",
+            },
           };
-        })
+        }),
       );
 
       socket.emit("getMessages", { success: true, data: messagesWithSenders });
     } catch (error) {
       console.error("getMessages error:", error);
-      socket.emit("getMessages", { success: false, msg: "Failed to fetch messages" });
+      socket.emit("getMessages", {
+        success: false,
+        msg: "Failed to fetch messages",
+      });
     }
   });
 
   /** newMessage */
   socket.on(
     "newMessage",
-    async (data: { conversationId: string; content?: string; attachment?: string }) => {
+    async (data: {
+      conversationId: string;
+      content?: string;
+      attachment?: string;
+    }) => {
       try {
         const { conversationId, content, attachment } = data;
         const senderId = socket.data.userId;
 
         if (!senderId || !conversationId)
-          return socket.emit("newMessage", { success: false, msg: "Invalid payload" });
+          return socket.emit("newMessage", {
+            success: false,
+            msg: "Invalid payload",
+          });
 
         // create message
-        const message = await Message.create({ conversationId, senderId, content, attachment });
+        const message = await Message.create({
+          conversationId,
+          senderId,
+          content,
+          attachment,
+        });
 
         // update conversation lastMessage + updatedAt
         await Conversation.findByIdAndUpdate(conversationId, {
@@ -209,10 +241,13 @@ export function registerMessageEvents(io: SocketIOServer, socket: Socket) {
             otherParticipantIds.map((participantId) =>
               ConversationMeta.findOneAndUpdate(
                 { conversationId, userId: participantId },
-                { $inc: { unreadCount: 1, unread: 1 }, $set: { isDeleted: false } },
-                { upsert: true, new: true }
-              )
-            )
+                {
+                  $inc: { unreadCount: 1, unread: 1 },
+                  $set: { isDeleted: false },
+                },
+                { upsert: true, new: true },
+              ),
+            ),
           );
         }
 
@@ -220,14 +255,13 @@ export function registerMessageEvents(io: SocketIOServer, socket: Socket) {
         const sender = await getUserFromEitherDb(String(senderId));
         const populated = {
           ...(await Message.findById(message._id).lean()),
-          senderId:
-            sender || {
-              _id: senderId,
-              name: "Unknown",
-              username: "",
-              avatar: "",
-              email: "",
-            },
+          senderId: sender || {
+            _id: senderId,
+            name: "Unknown",
+            username: "",
+            avatar: "",
+            email: "",
+          },
         };
 
         // broadcast newMessage
@@ -237,18 +271,25 @@ export function registerMessageEvents(io: SocketIOServer, socket: Socket) {
         });
 
         // personalized conversationUpdated for every participant
-        const conversationForUpdate = await Conversation.findById(conversationId).lean();
+        const conversationForUpdate =
+          await Conversation.findById(conversationId).lean();
         const populatedParticipants = conversationForUpdate
-          ? await populateParticipantsFromBothDbs(conversationForUpdate.participants || [])
+          ? await populateParticipantsFromBothDbs(
+              conversationForUpdate.participants || [],
+            )
           : [];
 
         let lastMessageData: any = null;
         if (conversationForUpdate?.lastMessage) {
-          lastMessageData = await Message.findById(conversationForUpdate.lastMessage)
+          lastMessageData = await Message.findById(
+            conversationForUpdate.lastMessage,
+          )
             .select("content senderId attachment createdAt conversationId")
             .lean();
           if (lastMessageData?.senderId) {
-            const s = await getUserFromEitherDb(String(lastMessageData.senderId));
+            const s = await getUserFromEitherDb(
+              String(lastMessageData.senderId),
+            );
             if (s) lastMessageData.senderId = s;
           }
         }
@@ -271,7 +312,10 @@ export function registerMessageEvents(io: SocketIOServer, socket: Socket) {
               .includes(uid);
             if (!isParticipant) continue;
 
-            const meta = await ConversationMeta.findOne({ conversationId, userId: uid })
+            const meta = await ConversationMeta.findOne({
+              conversationId,
+              userId: uid,
+            })
               .select("unreadCount")
               .lean();
 
@@ -291,9 +335,13 @@ export function registerMessageEvents(io: SocketIOServer, socket: Socket) {
 
           if (tokens.length > 0) {
             const senderName = (populated?.senderId as any)?.name || "Someone";
-            const body = attachment ? "Sent a photo" : trimBody(content) || "New message";
+            const body = attachment
+              ? "Sent a photo"
+              : trimBody(content) || "New message";
 
-            const participantsMin = (populatedConversation?.participants || []).map((p: any) => ({
+            const participantsMin = (
+              populatedConversation?.participants || []
+            ).map((p: any) => ({
               _id: String(p._id),
               name: p.name,
               avatar: p.avatar || "",
@@ -317,9 +365,12 @@ export function registerMessageEvents(io: SocketIOServer, socket: Socket) {
         }
       } catch (error) {
         console.error("newMessage error:", error);
-        socket.emit("newMessage", { success: false, msg: "Failed to send message" });
+        socket.emit("newMessage", {
+          success: false,
+          msg: "Failed to send message",
+        });
       }
-    }
+    },
   );
 
   /** markAsRead */
@@ -327,23 +378,49 @@ export function registerMessageEvents(io: SocketIOServer, socket: Socket) {
     try {
       const userId = socket.data.userId;
       if (!userId)
-        return socket.emit("markAsRead", { success: false, msg: "Unauthorized" });
+        return socket.emit("markAsRead", {
+          success: false,
+          msg: "Unauthorized",
+        });
+
+      // ✅ Guard: reject anything that isn't a valid 24-char hex ObjectId
+      const { Types } = await import("mongoose");
+      const cidStr = String(conversationId ?? "").trim();
+      if (!cidStr || !Types.ObjectId.isValid(cidStr)) {
+        console.warn(
+          "markAsRead: invalid conversationId rejected:",
+          conversationId,
+        );
+        return socket.emit("markAsRead", {
+          success: false,
+          msg: "Invalid conversationId",
+        });
+      }
 
       // reset both fields (unreadCount + legacy unread)
       await ConversationMeta.findOneAndUpdate(
-        { conversationId, userId },
-        { $set: { unreadCount: 0, unread: 0, lastReadAt: new Date(), isDeleted: false } },
-        { upsert: true }
+        { conversationId: cidStr, userId },
+        {
+          $set: {
+            unreadCount: 0,
+            unread: 0,
+            lastReadAt: new Date(),
+            isDeleted: false,
+          },
+        },
+        { upsert: true },
       );
 
-      const convo = await Conversation.findById(conversationId).lean();
+      const convo = await Conversation.findById(cidStr).lean();
       const populatedParticipants = convo
         ? await populateParticipantsFromBothDbs(convo.participants || [])
         : [];
 
       let lastMessageData: any = null;
-      if (convo?.lastMessage) {
-        lastMessageData = await Message.findById(convo.lastMessage)
+      // ✅ Guard: only call findById if lastMessage is a valid ObjectId (not a content string)
+      const rawLastMsg = String(convo?.lastMessage ?? "").trim();
+      if (rawLastMsg && Types.ObjectId.isValid(rawLastMsg)) {
+        lastMessageData = await Message.findById(rawLastMsg)
           .select("content senderId attachment createdAt conversationId")
           .lean();
         if (lastMessageData?.senderId) {
@@ -354,12 +431,20 @@ export function registerMessageEvents(io: SocketIOServer, socket: Socket) {
 
       socket.emit("conversationUpdated", {
         success: true,
-        data: { ...convo, participants: populatedParticipants, lastMessage: lastMessageData, unreadCount: 0 },
+        data: {
+          ...convo,
+          participants: populatedParticipants,
+          lastMessage: lastMessageData,
+          unreadCount: 0,
+        },
       });
       socket.emit("markAsRead", { success: true });
     } catch (error) {
       console.error("markAsRead error:", error);
-      socket.emit("markAsRead", { success: false, msg: "Failed to mark as read" });
+      socket.emit("markAsRead", {
+        success: false,
+        msg: "Failed to mark as read",
+      });
     }
   });
 }

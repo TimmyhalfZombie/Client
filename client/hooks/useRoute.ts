@@ -1,9 +1,11 @@
 import { useState, useCallback } from "react";
 import { Step } from "@/types";
+import { useAuth } from "@/contexts/authContext";
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || "http://localhost:3000";
 
 export function useRoute() {
+  const { token } = useAuth();
   const [routeGeoJSON, setRouteGeoJSON] = useState<any>(null);
   const [steps, setSteps] = useState<Step[]>([]);
   const [loading, setLoading] = useState(false);
@@ -25,32 +27,37 @@ export function useRoute() {
           headers: {
             "Content-Type": "application/json",
             // Add auth token if available
-            ...(global.authToken && { Authorization: `Bearer ${global.authToken}` }),
+            ...(token && {
+              Authorization: `Bearer ${token}`,
+            }),
           },
           body: JSON.stringify(body),
         });
 
         const json = await res.json();
-        
+
         if (json.success && json.data) {
           // Convert server response to GeoJSON format
           const geoJSON = {
             type: "FeatureCollection",
-            features: [{
-              type: "Feature",
-              geometry: json.data.geometry,
-              properties: json.data.properties
-            }]
+            features: [
+              {
+                type: "Feature",
+                geometry: json.data.geometry,
+                properties: json.data.properties,
+              },
+            ],
           };
-          
+
           setRouteGeoJSON(geoJSON);
-          
+
           // Extract steps from the response
-          const s: Step[] = json.data.properties.segments[0]?.steps?.map((st: any) => ({
-            instruction: st.instruction,
-            distance: st.distance,
-            duration: st.duration,
-          })) || [];
+          const s: Step[] =
+            json.data.properties.segments[0]?.steps?.map((st: any) => ({
+              instruction: st.instruction,
+              distance: st.distance,
+              duration: st.duration,
+            })) || [];
           setSteps(s);
         } else {
           setError(json.error || "Failed to fetch route");
@@ -62,11 +69,14 @@ export function useRoute() {
         setLoading(false);
       }
     },
-    []
+    [],
   );
 
   const fetchETA = useCallback(
-    async (operatorLocation: { lat: number; lng: number }, customerLocation: { lat: number; lng: number }) => {
+    async (
+      operatorLocation: { lat: number; lng: number },
+      customerLocation: { lat: number; lng: number },
+    ) => {
       try {
         setLoading(true);
         setError(null);
@@ -80,13 +90,15 @@ export function useRoute() {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            ...(global.authToken && { Authorization: `Bearer ${global.authToken}` }),
+            ...(token && {
+              Authorization: `Bearer ${token}`,
+            }),
           },
           body: JSON.stringify(body),
         });
 
         const json = await res.json();
-        
+
         if (json.success && json.data) {
           return json.data;
         } else {
@@ -101,7 +113,7 @@ export function useRoute() {
         setLoading(false);
       }
     },
-    []
+    [],
   );
 
   const clearRoute = useCallback(() => {
@@ -110,13 +122,13 @@ export function useRoute() {
     setError(null);
   }, []);
 
-  return { 
-    routeGeoJSON, 
-    steps, 
-    loading, 
-    error, 
-    fetchRoute, 
-    fetchETA, 
-    clearRoute 
+  return {
+    routeGeoJSON,
+    steps,
+    loading,
+    error,
+    fetchRoute,
+    fetchETA,
+    clearRoute,
   };
 }

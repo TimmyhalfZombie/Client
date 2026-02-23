@@ -5,6 +5,9 @@ import Constants from "expo-constants";
 export const MAPTILER_KEY: string =
   (Constants.expoConfig?.extra as any)?.MAPTILER_KEY || "iNtS1QIPq27RGWxB2TSX";
 
+export const GEOAPIFY_KEY: string =
+  (Constants.expoConfig?.extra as any)?.GEOAPIFY_KEY || "";
+
 /** Iloilo City (lng, lat) */
 export const ILOILO_CENTER: [number, number] = [122.564, 10.72];
 

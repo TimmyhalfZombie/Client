@@ -14,7 +14,7 @@ import ScreenWrapper from "@/components/ScreenWrapper";
 import Header from "@/components/Header";
 import BackButton from "@/components/BackButton";
 import Avatar from "@/components/Avatar";
-import * as Icons from "phosphor-react-native";                 
+import * as Icons from "phosphor-react-native";
 import Typo from "@/components/Typo";
 import Input from "@/components/Input";
 import { useAuth } from "@/contexts/authContext";
@@ -28,11 +28,6 @@ import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm, Controller } from "react-hook-form";
 
-// ✅ local sign-out cleanup (no navigation)
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { disconnectSocket } from "@/socket/socket";
-
-/* ----------------------------- Validation ----------------------------- */
 const profileSchema = z.object({
   name: z
     .string()
@@ -55,7 +50,7 @@ type ProfileFormData = z.infer<typeof profileSchema>;
 /* --------------------------------------------------------------------- */
 
 const ProfileModal = () => {
-  const { user, updateToken } = useAuth(); // ⛔ don't call signOut here to avoid nav
+  const { user, updateToken, clearAuth } = useAuth(); // ⛔ don't call signOut here to avoid nav
   const router = useRouter();
 
   const {
@@ -91,12 +86,7 @@ const ProfileModal = () => {
     setLoading(false);
     if (res.success) {
       updateToken(res.data.token);
-      reset({
-        name: res.data.user?.name || "",
-        email: res.data.user?.email || "",
-        phone: res.data.user?.phone || "",
-        avatar: res.data.user?.avatar ?? null,
-      });
+      // reset is handled by useEffect[user]
       router.back();
     } else {
       Alert.alert("User", res.msg);
@@ -130,11 +120,12 @@ const ProfileModal = () => {
   const doLogout = async () => {
     setLoggingOut(true);
     try {
-      // local cleanup only (no route change)
-      await AsyncStorage.removeItem("token");
-      await disconnectSocket();
+      // ✅ Use global clearAuth (updates state, storage, socket)
+      await clearAuth();
       setShowConfirm(false);
       setShowSuccess(true); // ✅ immediately show success card
+    } catch (error) {
+      console.error("Logout failed", error);
     } finally {
       setLoggingOut(false);
     }
@@ -183,7 +174,7 @@ const ProfileModal = () => {
       !!formValues?.avatar &&
       typeof formValues.avatar === "object" &&
       (formValues.avatar as any)?.uri,
-    [formValues?.avatar]
+    [formValues?.avatar],
   );
   const showAvatarUpdateBtn = (hasLocalAvatarChange || isDirty) && !loading;
 
@@ -227,7 +218,7 @@ const ProfileModal = () => {
                 accessibilityRole="button"
                 accessibilityLabel="Save profile changes"
               >
-                <Icons.PenIcon
+                <Icons.Pencil
                   size={verticalScale(20)}
                   color={colors.neutral800}
                 />
@@ -253,7 +244,7 @@ const ProfileModal = () => {
                   <Input
                     value={value}
                     icon={
-                      <Icons.UserIcon
+                      <Icons.User
                         size={verticalScale(20)}
                         color="#000000"
                         weight="fill"
@@ -263,8 +254,8 @@ const ProfileModal = () => {
                       borderColor: errors.name
                         ? colors.rose
                         : nameFocused
-                        ? FOCUS_BORDER
-                        : "#000000ff",
+                          ? FOCUS_BORDER
+                          : "#000000ff",
                       paddingLeft: spacingX._20,
                       backgroundColor: "#44ff75",
                       borderRadius: 180,
@@ -288,7 +279,7 @@ const ProfileModal = () => {
                 onPress={handleSubmit(onSubmit)}
                 disabled={loading}
               >
-                <Icons.PenIcon
+                <Icons.Pencil
                   size={verticalScale(18)}
                   color={colors.black}
                   weight="fill"
@@ -319,7 +310,7 @@ const ProfileModal = () => {
                     <Input
                       value={value || ""}
                       icon={
-                        <Icons.PhoneIcon
+                        <Icons.Phone
                           size={verticalScale(20)}
                           color="#000000"
                           weight="fill"
@@ -329,8 +320,8 @@ const ProfileModal = () => {
                         borderColor: errors.phone
                           ? colors.rose
                           : phoneFocused
-                          ? FOCUS_BORDER
-                          : "#000000",
+                            ? FOCUS_BORDER
+                            : "#000000",
                         paddingLeft: spacingX._20,
                         backgroundColor: "#44ff75",
                         borderRadius: 180,
@@ -355,7 +346,7 @@ const ProfileModal = () => {
                   onPress={handleSubmit(onSubmit)}
                   disabled={loading}
                 >
-                  <Icons.PenIcon
+                  <Icons.Pencil
                     size={verticalScale(18)}
                     color={colors.black}
                     weight="fill"
@@ -385,7 +376,7 @@ const ProfileModal = () => {
                 <Input
                   value={value}
                   icon={
-                    <Icons.EnvelopeSimpleIcon
+                    <Icons.EnvelopeSimple
                       size={verticalScale(20)}
                       color="#000000"
                       weight="fill"
@@ -437,7 +428,7 @@ const ProfileModal = () => {
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
             <View style={styles.modalIconCircle}>
-              <Icons.SignOutIcon size={72} color={colors.black} weight="bold" />
+              <Icons.SignOut size={72} color={colors.black} weight="bold" />
             </View>
 
             <Typo
@@ -479,7 +470,7 @@ const ProfileModal = () => {
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
             <View style={styles.modalIconCircle}>
-              <Icons.CheckIcon size={72} color={colors.black} weight="bold" />
+              <Icons.Check size={72} color={colors.black} weight="bold" />
             </View>
 
             <Typo

@@ -1,53 +1,37 @@
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import React from "react";
 import { AvatarProps } from "@/types";
 import { verticalScale } from "@/utils/styling";
-import { colors, radius } from "@/constants/theme";
-import { Image } from "react-native";
+import { Image } from "expo-image";
 import { getAvatarPath } from "@/services/imageService";
+
 const Avatar = ({ uri, size = 40, style }: AvatarProps) => {
   const src = getAvatarPath(uri);
 
-  // Normalize different shapes: string URL, local require (number), or an object
-  // from image picker which may have { uri } or { url }.
-  let imageSource: any = null;
+  // Determine if it's a remote URL or a local requirement
+  const imageSource = typeof src === "string" ? { uri: src } : src;
 
-  if (typeof src === "string" && src.trim() !== "") {
-    imageSource = { uri: src };
-  } else if (src && typeof src === "object") {
-    const possibleUri = (src as any).uri || (src as any).url;
-    if (
-      possibleUri &&
-      typeof possibleUri === "string" &&
-      possibleUri.trim() !== ""
-    ) {
-      imageSource = { uri: possibleUri };
-    } else {
-      // src might be a local require() which is a number (handled below)
-      imageSource = src;
-    }
-  } else {
-    // src could be a local module (number) or null — fall back to src
-    imageSource = src;
-  }
-
-  if (__DEV__) {
-    // Helpful debug info when running the app in development
-    // eslint-disable-next-line no-console
-    console.log("[Avatar] resolved imageSource:", { uri, src, imageSource });
-  }
+  const scaledSize = verticalScale(size);
 
   return (
     <View
       style={[
         styles.avatar,
-        { height: verticalScale(size), width: verticalScale(size) },
+        {
+          height: scaledSize,
+          width: scaledSize,
+          borderRadius: scaledSize / 2,
+        },
+        style,
       ]}
     >
       <Image
-        style={{ flex: 1 }}
-        source={imageSource as any}
-        resizeMode="cover"
+        style={[styles.image, { backgroundColor: "transparent" }]}
+        source={imageSource}
+        // Fallback placeholder while loading or if source fails
+        placeholder={require("../assets/images/defaultAvatar.png")}
+        contentFit="cover"
+        transition={150}
       />
     </View>
   );
@@ -58,12 +42,15 @@ export default Avatar;
 const styles = StyleSheet.create({
   avatar: {
     alignSelf: "center",
-    backgroundColor: colors.neutral200,
-    height: verticalScale(47),
-    width: verticalScale(47),
-    borderRadius: radius.full,
-    borderWidth: 1,
-    borderEndColor: colors.neutral100,
+    backgroundColor: "transparent",
     overflow: "hidden",
+    // Subtle border to help define the circle on bright backgrounds
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.1)",
+  },
+  image: {
+    flex: 1,
+    width: "100%",
+    height: "100%",
   },
 });

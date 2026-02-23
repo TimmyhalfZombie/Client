@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { useChat } from "@/contexts/ChatContext";
 import Animated, {
   Easing,
   useAnimatedProps,
@@ -59,8 +60,9 @@ export default function CurvedTabBar({
   // Keep only tabs we explicitly style for
   const routes = useMemo(
     () => state.routes.filter((r) => SAFE_TABS.has(r.name)),
-    [state.routes]
+    [state.routes],
   );
+  const { totalUnreadCount } = useChat();
 
   // If nothing to render, bail out (avoids any undefined route access)
   if (routes.length === 0) {
@@ -84,7 +86,7 @@ export default function CurvedTabBar({
   const [width, setWidth] = useState<number>(SCREEN_WIDTH);
   const onLayout = useCallback(
     (e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width),
-    []
+    [],
   );
 
   // Shared values
@@ -94,7 +96,7 @@ export default function CurvedTabBar({
 
   // Positions
   const notchCenterX = useSharedValue(
-    activeIndex * tabWsv.value + tabWsv.value / 2
+    activeIndex * tabWsv.value + tabWsv.value / 2,
   );
   const haloX = useSharedValue(activeIndex * tabWsv.value);
   const haloLiftY = useSharedValue(0);
@@ -158,7 +160,7 @@ export default function CurvedTabBar({
       cx: number,
       notchW: number,
       notchD: number,
-      radius: number
+      radius: number,
     ): string {
       "worklet";
       const left = 0,
@@ -221,7 +223,7 @@ export default function CurvedTabBar({
       routeName: string,
       routeKey: string,
       isFocused: boolean,
-      index: number
+      index: number,
     ) => {
       if (activeIndex === index) {
         haloLiftY.value = withTiming(
@@ -232,14 +234,14 @@ export default function CurvedTabBar({
               duration: 160,
               easing: Easing.out(Easing.cubic),
             });
-          }
+          },
         );
         notchDepthSV.value = withTiming(
           NOTCH_PRESS_DEPTH,
           { duration: 110 },
           () => {
             notchDepthSV.value = withTiming(NOTCH_DEPTH, { duration: 160 });
-          }
+          },
         );
       }
 
@@ -252,7 +254,7 @@ export default function CurvedTabBar({
         navigation.navigate(routeName as never);
       }
     },
-    [navigation, activeIndex, haloLiftY, notchDepthSV]
+    [navigation, activeIndex, haloLiftY, notchDepthSV],
   );
 
   const activeRoute = routes[activeIndex] ?? routes[0];
@@ -303,6 +305,11 @@ export default function CurvedTabBar({
         >
           <View style={styles.halo}>
             <ActiveIconComp size={24} color={"#0C0C0C"} weight="fill" />
+            {activeRoute?.name === "message" && totalUnreadCount > 0 && (
+              <View style={styles.badgeActive}>
+                <Text style={styles.badgeText}>{totalUnreadCount}</Text>
+              </View>
+            )}
           </View>
         </Animated.View>
 
@@ -318,8 +325,8 @@ export default function CurvedTabBar({
               (route.name === "message"
                 ? "Messages"
                 : route.name === "profileModal"
-                ? "Profile"
-                : toTitle(route.name));
+                  ? "Profile"
+                  : toTitle(route.name));
             const label = typeof raw === "string" ? raw : toTitle(route.name);
 
             let IconComp: any;
@@ -355,6 +362,11 @@ export default function CurvedTabBar({
                 <View style={styles.tabInner}>
                   <View style={{ opacity: isFocused ? 0 : 1 }}>
                     <IconComp size={24} color={INACTIVE_TEXT} />
+                    {route.name === "message" && totalUnreadCount > 0 && (
+                      <View style={styles.badgeInactive}>
+                        <Text style={styles.badgeText}>{totalUnreadCount}</Text>
+                      </View>
+                    )}
                   </View>
                   <Text style={[styles.label, isFocused && styles.labelActive]}>
                     {label}
@@ -403,5 +415,38 @@ const styles = StyleSheet.create({
     backgroundColor: ACTIVE_GREEN,
     alignItems: "center",
     justifyContent: "center",
+  },
+  badgeInactive: {
+    position: "absolute",
+    right: -8,
+    top: -8,
+    backgroundColor: "#FF3B30",
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 4,
+    borderWidth: 1.5,
+    borderColor: "#0D0D0D",
+  },
+  badgeActive: {
+    position: "absolute",
+    right: -4,
+    top: -4,
+    backgroundColor: "#FF3B30",
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 4,
+    borderWidth: 1.5,
+    borderColor: ACTIVE_GREEN,
+  },
+  badgeText: {
+    color: "white",
+    fontSize: 10,
+    fontWeight: "bold",
   },
 });

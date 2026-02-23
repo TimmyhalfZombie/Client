@@ -26,7 +26,7 @@ export function registerUserEvents(io: SocketIOServer, socket: Socket) {
         const updatedUser = await User.findByIdAndUpdate(
           userId,
           { name: data.name, avatar: data.avatar, phone: data.phone },
-          { new: true }
+          { new: true },
         );
 
         if (!updatedUser) {
@@ -40,7 +40,7 @@ export function registerUserEvents(io: SocketIOServer, socket: Socket) {
 
         socket.emit("updateProfile", {
           success: true,
-          data: { token: newToken },
+          data: { token: newToken, user: updatedUser },
           msg: "Profile updated successfully",
         });
       } catch (error) {
@@ -50,7 +50,7 @@ export function registerUserEvents(io: SocketIOServer, socket: Socket) {
           msg: "Error updating profile",
         });
       }
-    }
+    },
   );
 
   socket.on("getContacts", async () => {
@@ -66,7 +66,7 @@ export function registerUserEvents(io: SocketIOServer, socket: Socket) {
 
       const users = await User.find(
         { _id: { $ne: currentUserId } },
-        { password: 0 }
+        { password: 0 },
       ).lean();
 
       const contacts = users.map((user) => ({
@@ -99,8 +99,10 @@ export function registerUserEvents(io: SocketIOServer, socket: Socket) {
       }
 
       // Try customer database first
-      const updated = await User.findByIdAndUpdate(userId, { expoPushToken: data.token });
-      
+      const updated = await User.findByIdAndUpdate(userId, {
+        expoPushToken: data.token,
+      });
+
       if (updated) {
         socket.emit("registerPushToken", { success: true });
         return;
@@ -110,14 +112,24 @@ export function registerUserEvents(io: SocketIOServer, socket: Socket) {
       try {
         const appdbConnection = getAppdbConnection();
         const AppdbUserSchema = new Schema(
-          { username: String, name: String, email: String, avatar: String, phone: String, expoPushToken: String },
-          { collection: "users", strict: false }
+          {
+            username: String,
+            name: String,
+            email: String,
+            avatar: String,
+            phone: String,
+            expoPushToken: String,
+          },
+          { collection: "users", strict: false },
         );
         const AppdbUser =
-          appdbConnection.models.User || appdbConnection.model("User", AppdbUserSchema);
+          appdbConnection.models.User ||
+          appdbConnection.model("User", AppdbUserSchema);
 
-        const appdbUpdated = await AppdbUser.findByIdAndUpdate(userId, { expoPushToken: data.token });
-        
+        const appdbUpdated = await AppdbUser.findByIdAndUpdate(userId, {
+          expoPushToken: data.token,
+        });
+
         if (appdbUpdated) {
           socket.emit("registerPushToken", { success: true });
           return;

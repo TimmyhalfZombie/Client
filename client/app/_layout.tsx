@@ -12,6 +12,7 @@ import { AuthProvider } from "@/contexts/authContext";
 import { LocationProvider } from "@/contexts/LocationContext";
 import { colors } from "@/constants/theme";
 import ErrorBoundary from "@/components/ErrorBoundary";
+import { ChatProvider } from "@/contexts/ChatContext";
 
 // 🔔 Registers push token, handles taps, foreground local toasts
 import NotificationBridge from "@/components/NotificationBridge";
@@ -41,33 +42,35 @@ export default function RootLayout() {
         <ErrorBoundary>
           <View style={{ flex: 1 }} onLayout={onLayoutRootView}>
             <AuthProvider>
-              <LocationProvider>
-                <ToastProvider>
-                  <NotificationBridge />
-                  <AssistSocketBridge />
-                  <Stack
-                    screenOptions={{
-                      headerShown: false,
-                      animation: "fade_from_bottom",
-                      contentStyle: { backgroundColor: colors.black },
-                    }}
-                  >
-                    <Stack.Screen
-                      name="patching"
-                      options={{
+              <ChatProvider>
+                <LocationProvider>
+                  <ToastProvider>
+                    <NotificationBridge />
+                    <AssistSocketBridge />
+                    <Stack
+                      screenOptions={{
                         headerShown: false,
-                        presentation: "fullScreenModal",
-                        animation: "none",
-                        gestureEnabled: false,
+                        animation: "fade_from_bottom",
+                        contentStyle: { backgroundColor: colors.black },
                       }}
-                    />
-                    <Stack.Screen
-                      name="(main)"
-                      options={{ headerShown: false }}
-                    />
-                  </Stack>
-                </ToastProvider>
-              </LocationProvider>
+                    >
+                      <Stack.Screen
+                        name="patching"
+                        options={{
+                          headerShown: false,
+                          presentation: "fullScreenModal",
+                          animation: "none",
+                          gestureEnabled: false,
+                        }}
+                      />
+                      <Stack.Screen
+                        name="(main)"
+                        options={{ headerShown: false }}
+                      />
+                    </Stack>
+                  </ToastProvider>
+                </LocationProvider>
+              </ChatProvider>
             </AuthProvider>
           </View>
         </ErrorBoundary>

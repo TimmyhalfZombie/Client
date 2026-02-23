@@ -60,6 +60,7 @@ export type AuthContextProps = {
   ) => Promise<void>;
   signOut: () => Promise<void>;
   updateToken: (token: string) => Promise<void>;
+  clearAuth: () => Promise<void>;
 };
 
 export type ScreenWrapperProps = {
@@ -186,7 +187,14 @@ export type ActivityItem = {
   title: string;
   placeName?: string;
   createdAt: string;
-  status: "pending" | "accepted" | "completed";
+  status:
+    | "pending"
+    | "accepted"
+    | "en_route"
+    | "arrived"
+    | "working"
+    | "completed"
+    | "canceled";
   meta?: { assistId?: string | null; operator?: any; [k: string]: any };
   location?: {
     street?: string;
