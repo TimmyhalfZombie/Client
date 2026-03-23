@@ -3,7 +3,7 @@ import { StyleSheet, TouchableOpacity, View, Animated } from "react-native";
 import { colors, spacingX, spacingY } from "@/constants/theme";
 import Avatar from "./Avatar";
 import Typo from "./Typo";
-import moment from "moment";
+import { format, isSameDay, isSameYear, differenceInMinutes } from "date-fns";
 import { ConversationListItemProps } from "@/types";
 import { useAuth } from "@/contexts/authContext";
 import * as Icons from "phosphor-react-native";
@@ -117,12 +117,12 @@ const ConversationItem = ({
 
   const getLastMessageDate = () => {
     if (!lastMessage?.createdAt) return null;
-    const d = moment(lastMessage.createdAt);
-    const now = moment();
-    if (now.diff(d, "minutes") < 1) return "now";
-    if (d.isSame(now, "day")) return d.format("h:mm A");
-    if (d.isSame(now, "year")) return d.format("MMM D");
-    return d.format("MMM D, YYYY");
+    const d = new Date(lastMessage.createdAt);
+    const now = new Date();
+    if (differenceInMinutes(now, d) < 1) return "now";
+    if (isSameDay(d, now)) return format(d, "h:mm a");
+    if (isSameYear(d, now)) return format(d, "MMM d");
+    return format(d, "MMM d, yyyy");
   };
   const timeLabel = getLastMessageDate();
 
