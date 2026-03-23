@@ -2,7 +2,7 @@
   "expo": {
     "slug": "patch-up",
     "name": "patch-up",
-    "owner": "cjblack",
+    "owner": "timmy1111",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/adaptive-icon.png",
@@ -64,9 +64,6 @@
     ],
     "extra": {
       "router": {},
-      "eas": {
-        "projectId": "969a417a-4a49-4064-9571-5832b8571c40"
-      },
       "MAPTILER_KEY": "iNtS1QIPq27RGWxB2TSX",
       "GEOAPIFY_KEY": "7ce1866e9a854276bcad7b6ca897f1fd",
       "EXPO_PUBLIC_ORS_KEY": "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImUwNDdmMzMxYzM2ZjQ4MGJiYmQzYzA3NTRkMzBiMzI0IiwiaCI6Im11cm11cjY0In0=",
